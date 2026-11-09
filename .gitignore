@@ -1,0 +1,59 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Testing & Coverage
+/coverage
+/.nyc_output
+
+# Build / Compiled Output (สำหรับ TypeScript / NestJS / Babel)
+/dist
+/build
+*.tsbuildinfo
+
+# Environment & Secrets (ห้ามหลุดขึ้น Git เด็ดขาด)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*
+
+# Local Database Files (กรณีใช้ SQLite หรือไฟล์ดึงข้อมูลเฉพาะเครื่อง)
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# File Uploads / Local Storage (ไฟล์รูปภาพหรือไฟล์ที่ผู้ใช้อัปโหลดเข้ามา ไม่ควรเก็บใน Git)
+/uploads
+/public/uploads
+/storage
+
+# Logs & Debug
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# OS & Editor Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+
+# Vercel / Deployment
+.vercel
