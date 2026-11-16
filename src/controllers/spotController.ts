@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { Spot, Photo, Animal, User, SpottedIn } from "../models/index.js";  
+import { Spot, Photo, Animal, User, SpottedIn } from "../models/index.js";
 import { generatePresignedUrl } from "../services/r2Service.js";
 
 // api for presignedurl
@@ -38,7 +38,19 @@ export const createSpot = async (
   try {
     const { title, description, address, lat, lng, photoUrls, animals, date } =
       req.body;
-    const userId = 1;
+
+    //const userId = 1;
+
+    //ตอนที่สร้าง spot มันจะให้ spot บันทึกว่า userID ไหนเป็นคนสร้าง
+    const userId = req.session.userID;
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: "Please log in",
+      });
+      return;
+    }
+
     const newSpot = await Spot.create({
       userId: userId,
       title,

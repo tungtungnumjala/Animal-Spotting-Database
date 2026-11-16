@@ -26,7 +26,8 @@ export const generatePresignedUrl = async (fileName: string, fileType: string) =
   const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
 
   return {
-    uploadUrl, // ลิงก์เอาไว้ upload ส่งไป frontend
-    publicUrl: `${process.env.R2_PUBLIC_URL}/${uniqueFileName}`, // ลิงก์ถาวรสำหรับเอาไปบันทึกลง db แสดงผล
+    uploadUrl, // ลิงก์เอาไว้ upload ส่งไป frontend 
+    publicUrl: `${process.env.R2_PUBLIC_URL?.replace(/\/+$/, "")}/${uniqueFileName}`, // ลบเฉพาะ / ที่อยู่ท้าย URL ทั้งหมด แล้วเติม / หนึ่งตัวตอนต่อชื่อไฟล์
+    //publicUrl: `${process.env.R2_PUBLIC_URL}/${uniqueFileName}`, // ลิงก์ถาวรสำหรับเอาไปบันทึกลง db แสดงผล
   };
 };
