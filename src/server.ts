@@ -5,6 +5,7 @@ import sequelize from './config/db.js';
 import animalRoutes from './routes/animalRoutes.js';
 import spotRoutes from './routes/spotRoutes.js'
 import authRoutes from './routes/authRoutes.js';
+import collectionRoutes from "./routes/collectionRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -43,6 +44,7 @@ app.use(
 app.use('/api/animals', animalRoutes);
 app.use('/api/spots', spotRoutes);
 app.use('/api/auth', authRoutes);
+app.use("/api/collection", collectionRoutes);
 
 app.get('/', (req, res) => {
     res.send('Animal Spotting API is running! 🦁🐯');
