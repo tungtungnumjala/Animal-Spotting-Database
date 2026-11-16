@@ -9,7 +9,7 @@ export const PROFILE_IMAGE_EXTENSIONS: Record<string, string> = {
 };
 export const MAX_PROFILE_PHOTO_SIZE = 2 * 1024 * 1024;
 
-export async function generateProfilePresignedUrl(userID: number, fileType: string) {
+function createProfileUpload(userID: number, fileType: string) {
   const extension = PROFILE_IMAGE_EXTENSIONS[fileType];
   if (!extension) throw new Error("Unsupported profile image type");
 
@@ -37,6 +37,7 @@ export async function generateProfilePresignedUrl(userID: number, fileType: stri
     region: "auto",
     endpoint,
     credentials: { accessKeyId, secretAccessKey },
+    requestChecksumCalculation: "WHEN_REQUIRED",
   });
   const command = new PutObjectCommand({
     Bucket: bucket,
@@ -44,6 +45,21 @@ export async function generateProfilePresignedUrl(userID: number, fileType: stri
     ContentType: fileType,
   });
 
+  return { client, command, publicUrl };
+}
+
+export async function generateProfilePresignedUrl(userID: number, fileType: string) {
+  const { client, command, publicUrl } = createProfileUpload(userID, fileType);
   const uploadUrl = await getSignedUrl(client, command, { expiresIn: 300 });
   return { uploadUrl, publicUrl };
+}
+
+export async function uploadProfilePhoto(userID: number, fileType: string, body: Buffer) {
+  const { client, command, publicUrl } = createProfileUpload(userID, fileType);
+  try {
+    await client.send(new PutObjectCommand({ ...command.input, Body: body }));
+    return publicUrl;
+  } finally {
+    client.destroy();
+  }
 }
