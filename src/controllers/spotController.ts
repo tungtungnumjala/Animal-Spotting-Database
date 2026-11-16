@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
-import { Spot, Photo, Animal, User, SpottedIn } from "../models/index.js";  
+import { Spot, Photo, Animal, User, SpottedIn } from "../models/index.js";
 import { generatePresignedUrl } from "../services/r2Service.js";
+import sequelize from "../config/db.js";
 
 // api for presignedurl
 export const getPresignedUrl = async (
@@ -35,45 +36,90 @@ export const createSpot = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
-  try {
-    const { title, description, address, lat, lng, photoUrls, animals, date } =
-      req.body;
-    const userId = 1;
-    const newSpot = await Spot.create({
-      userId: userId,
-      title,
-      description,
-      address,
-      latitude: lat,
-      longitude: lng,
-      date,
+  const { title, description, address, lat, lng, photoUrls, animals, date } =
+    req.body;
+  const userId = 1;
+
+  if (!animals || !Array.isArray(animals) || animals.length === 0) {
+    res.status(400).json({
+      success: false,
+      message: "Please select at least one animal species.",
     });
+    return;
+  }
+
+  if (!photoUrls || !Array.isArray(photoUrls) || photoUrls.length === 0) {
+    res.status(400).json({
+      success: false,
+      message: "Please upload at least one photo.",
+    });
+    return;
+  }
+  //เปิด transaction
+  const t = await sequelize.transaction();
+
+  try {
+    const newSpot = await Spot.create(
+      {
+        userId: userId,
+        title,
+        description,
+        address,
+        latitude: lat,
+        longitude: lng,
+        date,
+      },
+      { transaction: t },
+    );
+
     if (photoUrls && Array.isArray(photoUrls) && photoUrls.length > 0) {
-      for (const url of photoUrls) {
-        await Photo.create({
+      const photoRecords = photoUrls.map((url: string) => ({
+        spotId: newSpot.spotId,
+        photoUrl: url,
+      }));
+      await Photo.bulkCreate(photoRecords, { transaction: t });
+    }
+
+    if (animals && Array.isArray(animals) && animals.length > 0) {
+      const uniqueAnimalIds = [
+        ...new Set(
+          animals
+            .map((animal: any) =>
+              typeof animal === "object"
+                ? Number(animal.animalId)
+                : Number(animal),
+            )
+            .filter((id: number) => !Number.isNaN(id) && id > 0),
+        ),
+      ];
+
+      if (uniqueAnimalIds.length > 0) {
+        // บันทึกลงตาราง SpottedIn
+        const spottedRecords = uniqueAnimalIds.map((animalId) => ({
           spotId: newSpot.spotId,
-          photoUrl: url,
+          animalId: animalId,
+        }));
+        await SpottedIn.bulkCreate(spottedRecords, { transaction: t });
+
+        await Animal.increment("spotsCount", {
+          by: 1,
+          where: {
+            animalId: uniqueAnimalIds,
+          },
+          transaction: t,
         });
       }
     }
-    if (animals && Array.isArray(animals) && animals.length > 0) {
-      for (const animal of animals) {
-        const animalId = typeof animal === "object" ? animal.animalId : animal;
 
-        if (animalId) {
-          await SpottedIn.create({
-            spotId: newSpot.spotId,
-            animalId: animalId,
-          });
-        }
-      }
-    }
+    await t.commit();
+
     res.status(201).json({
       success: true,
       message: "Spot created successfully",
       data: newSpot,
     });
   } catch (error) {
+    await t.rollback();
     console.error("Error creating spot:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
