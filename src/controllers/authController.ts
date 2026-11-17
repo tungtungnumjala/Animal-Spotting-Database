@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { UniqueConstraintError } from "sequelize";
 import User from "../models/User.js";
 import { hashPassWord, verifyPassword } from "../utils/password.js";
+import { uploadProfilePhoto } from "../services/profileR2Service.js";
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -71,12 +72,21 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     const hashedPassword = await hashPassWord(password);
 
     // บันทึกผู้ใช้ลงตาราง user
-    const user = await User.create({
+    const values = {
       username: cleanUsername,
       email: cleanEmail,
       password: hashedPassword,
       profileImage: null,
-    });
+    };
+    const photo = req.file;
+    const user = photo
+      ? await User.sequelize!.transaction(async (transaction) => {
+          const created = await User.create(values, { transaction });
+          const profileImage = await uploadProfilePhoto(created.userID, photo.mimetype, photo.buffer);
+          await created.update({ profileImage }, { transaction });
+          return created;
+        })
+      : await User.create(values);
 
     // ส่งเฉพาะข้อมูลที่ต้องใช้กลับไป
     res.status(201).json({
@@ -99,6 +109,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    console.error("Registration failed:", error instanceof Error ? error.message : "Unknown error");
     res.status(500).json({
       success: false,
       message: "Unable to register. Please try again",
