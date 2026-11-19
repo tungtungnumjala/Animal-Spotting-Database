@@ -5,6 +5,7 @@ import {
   deleteFilesFromR2,
 } from "../services/r2ServiceSpots.js";
 import sequelize from "../config/db.js";
+import { Op } from "sequelize";
 
 // api for presignedurl
 export const getPresignedUrl = async (
@@ -309,7 +310,7 @@ export const updateSpot = async (
 
         await Animal.decrement("spotsCount", {
           by: 1,
-          where: { animalId: removedAnimalIds },
+          where: { animalId: removedAnimalIds, spotsCount: { [Op.gt]: 0 } },
           transaction: t,
         });
       }
@@ -439,7 +440,7 @@ export const deleteSpot = async (
     if (animalIds.length > 0) {
       await Animal.decrement("spotsCount", {
         by: 1,
-        where: { animalId: animalIds },
+        where: { animalId: animalIds, spotsCount: { [Op.gt]: 0 } },
         transaction: t,
       });
     }
