@@ -1,9 +1,11 @@
 import type { Request, Response } from 'express';
-import Animal from '../models/Animal.js';
+import Animal from '../models/Relation/Animal.js';
 
 export const getAllAnimals = async (req: Request, res: Response): Promise<void> => {
   try {
-    const animals = await Animal.findAll();
+    const animals = await Animal.findAll({
+      order: [['spotsCount', 'DESC']], 
+    });
     res.status(200).json({
       success: true,
       message: 'Successfully fetched animals',  
