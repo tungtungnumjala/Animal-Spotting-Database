@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getProfilePhotoUploadUrl, updateProfile } from '../controllers/profileController.js';
+import { changePassword } from '../controllers/passwordController.js';
 import { registerPhotoUpload } from '../middleware/registerPhotoUpload.js';
 import {
     register,
@@ -14,6 +15,7 @@ router.post('/register', registerPhotoUpload, register);
 router.post('/login', login);
 router.get('/me', getMe);
 router.patch('/me', updateProfile);
+router.patch('/password', changePassword);
 router.post('/profile-photo-url', getProfilePhotoUploadUrl);
 router.post('/logout', logout);
 
