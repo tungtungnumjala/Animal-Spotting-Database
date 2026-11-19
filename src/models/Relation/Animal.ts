@@ -46,6 +46,9 @@ Animal.init(
       allowNull: false,
       defaultValue: 0,
       field: 'spots_count',
+      validate: {
+        min: 0,
+      },
     },
     createdAt: {
       type: DataTypes.DATE,
