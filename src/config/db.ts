@@ -1,17 +1,7 @@
-import { Sequelize } from 'sequelize';
-import dotenv from 'dotenv';
+import { PrismaClient } from '../generated/prisma/client.js';
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 
-dotenv.config();
+const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
+const prisma = new PrismaClient({ adapter });
 
-const sequelize = new Sequelize(
-  process.env.DB_NAME || 'animal_spotting_db', 
-  process.env.DB_USER || 'root',
-  process.env.DB_PASS || '',
-  {
-    host: process.env.DB_HOST || 'localhost',
-    dialect: 'mysql',
-    logging: false,
-  }
-);
-
-export default sequelize;
+export default prisma;

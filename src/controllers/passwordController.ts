@@ -1,11 +1,11 @@
 import type { Request, Response } from "express";
-import User from "../models/User.js";
+import prisma from "../config/db.js";
 import { hashPassWord, verifyPassword } from "../utils/password.js";
 
 export const changePassword = async (req: Request, res: Response): Promise<void> => {
   res.set("Cache-Control", "no-store");
-  const userID = req.session.userID;
-  if (!userID) {
+  const userId = req.session.userID;
+  if (!userId) {
     res.status(401).json({ success: false, message: "Please log in" });
     return;
   }
@@ -29,8 +29,10 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
   }
 
   try {
-    // ใช้บัญชีจาก session เท่านั้น ไม่รับ userID จากฟอร์ม
-    const user = await User.findByPk(userID, { attributes: ["userID", "password"] });
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true, password: true },
+    });
     if (!user) {
       res.status(401).json({ success: false, message: "Please log in" });
       return;
@@ -41,12 +43,13 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
     }
 
     const password = await hashPassWord(newPassword);
-    // ป้องกันคำขอพร้อมกันเขียนทับรหัสที่เพิ่งเปลี่ยนไปแล้ว
-    const [updated] = await User.update({ password }, {
-      where: { userID, password: user.password },
-      fields: ["password"],
+    // ใช้ updateMany เพื่อเช็กเงื่อนไข password เดิมป้องกัน race condition แบบเดียวกับ Sequelize
+    const result = await prisma.user.updateMany({
+      where: { userId, password: user.password },
+      data: { password },
     });
-    if (updated !== 1) {
+
+    if (result.count !== 1) {
       res.status(409).json({ success: false, field: "currentPassword", message: "Your password has changed. Please enter your current password and try again." });
       return;
     }

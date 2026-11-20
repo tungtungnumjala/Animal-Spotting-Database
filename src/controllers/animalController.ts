@@ -1,14 +1,14 @@
 import type { Request, Response } from 'express';
-import Animal from '../models/Relation/Animal.js';
+import prisma from '../config/db.js';
 
 export const getAllAnimals = async (req: Request, res: Response): Promise<void> => {
   try {
-    const animals = await Animal.findAll({
-      order: [['spotsCount', 'DESC']], 
+    const animals = await prisma.animal.findMany({
+      orderBy: { spotsCount: 'desc' },
     });
     res.status(200).json({
       success: true,
-      message: 'Successfully fetched animals',  
+      message: 'Successfully fetched animals',
       data: animals,
     });
   } catch (error) {

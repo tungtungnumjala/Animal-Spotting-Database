@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
-import { UniqueConstraintError } from "sequelize";
-import User from "../models/User.js";
+import { Prisma } from "../generated/prisma/client.js";
+import prisma from "../config/db.js";
 import {
   generateProfilePresignedUrl,
   MAX_PROFILE_PHOTO_SIZE,
@@ -9,8 +9,8 @@ import {
 
 export const getProfilePhotoUploadUrl = async (req: Request, res: Response): Promise<void> => {
   res.set("Cache-Control", "no-store");
-  const userID = req.session.userID;
-  if (!userID) {
+  const userId = req.session.userID;
+  if (!userId) {
     res.status(401).json({ success: false, message: "Please log in" });
     return;
   }
@@ -32,13 +32,16 @@ export const getProfilePhotoUploadUrl = async (req: Request, res: Response): Pro
   }
 
   try {
-    const user = await User.findByPk(userID, { attributes: ["userID"] });
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true },
+    });
     if (!user) {
       res.status(401).json({ success: false, message: "Please log in" });
       return;
     }
 
-    const data = await generateProfilePresignedUrl(userID, fileType);
+    const data = await generateProfilePresignedUrl(userId, fileType);
     res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("Profile photo upload:", error instanceof Error ? error.message : "Unknown error");
@@ -52,8 +55,8 @@ export const getProfilePhotoUploadUrl = async (req: Request, res: Response): Pro
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
   res.set("Cache-Control", "no-store");
 
-  const userID = req.session.userID;
-  if (!userID) {
+  const userId = req.session.userID;
+  if (!userId) {
     res.status(401).json({ success: false, message: "Please log in" });
     return;
   }
@@ -101,53 +104,57 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
   }
 
   try {
-
-    const user = await User.findByPk(userID, {
-      attributes: ["userID", "username", "email", "profileImage"],
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true, username: true, email: true, profileImage: true },
     });
     if (!user) {
       res.status(401).json({ success: false, message: "Please log in" });
       return;
     }
 
-    const emailOwner = await User.findOne({
+    const emailOwner = await prisma.user.findUnique({
       where: { email: cleanEmail },
-      attributes: ["userID"],
+      select: { userId: true },
     });
-    if (emailOwner && emailOwner.userID !== user.userID) {
+    if (emailOwner && emailOwner.userId !== user.userId) {
       res.status(409).json({ success: false, message: "Email is already registered" });
       return;
     }
 
     if (cleanUsername !== user.username) {
-      const usernameOwner = await User.findOne({
+      const usernameOwner = await prisma.user.findFirst({
         where: { username: cleanUsername },
-        attributes: ["userID"],
+        select: { userId: true },
       });
-      if (usernameOwner && usernameOwner.userID !== user.userID) {
+      if (usernameOwner && usernameOwner.userId !== user.userId) {
         res.status(409).json({ success: false, message: "Username is already taken" });
         return;
       }
     }
 
-    await user.update({
-      username: cleanUsername,
-      email: cleanEmail,
-      ...(cleanImage !== undefined ? { profileImage: cleanImage } : {}),
-    }, { fields: ["username", "email", "profileImage"] });
+    const updatedUser = await prisma.user.update({
+      where: { userId },
+      data: {
+        username: cleanUsername,
+        email: cleanEmail,
+        ...(cleanImage !== undefined ? { profileImage: cleanImage } : {}),
+      },
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        profileImage: true,
+      },
+    });
 
     res.status(200).json({
       success: true,
       message: "Profile updated successfully",
-      data: {
-        userID: user.userID,
-        username: user.username,
-        email: user.email,
-        profileImage: user.profileImage,
-      },
+      data: updatedUser,
     });
   } catch (error) {
-    if (error instanceof UniqueConstraintError) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       res.status(409).json({ success: false, message: "Email is already registered" });
       return;
     }

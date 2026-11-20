@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { Spot, Photo, Animal } from "../models/index.js";
+import prisma from "../config/db.js";
 
 export const getMySpots = async (
   req: Request,
@@ -14,30 +14,35 @@ export const getMySpots = async (
     });
     return;
   }
+
   try {
-    const spots = await Spot.findAll({
+    const rawSpots = await prisma.spot.findMany({
       where: { userId },
-      include: [
-        {
-          model: Photo,
-          as: "photos",
-          attributes: ["photoId", "photoUrl"],
+      include: {
+        photos: {
+          select: { photoId: true, photoUrl: true },
         },
-        {
-          model: Animal,
-          as: "animals",
-          attributes: [
-            "animalId",
-            "categoryId",
-            "name",
-            "animalImagePin",
-            "spotsCount",
-          ],
-          through: { attributes: [] }, 
+        spottedIn: {
+          select: {
+            animal: {
+              select: {
+                animalId: true,
+                categoryId: true,
+                name: true,
+                animalImagePin: true,
+                spotsCount: true,
+              },
+            },
+          },
         },
-      ],
-      order: [["createdAt", "DESC"]],
+      },
+      orderBy: { createdAt: "desc" },
     });
+
+    const spots = rawSpots.map(({ spottedIn, ...spot }) => ({
+      ...spot,
+      animals: spottedIn.map((item) => item.animal),
+    }));
 
     res.status(200).json({
       success: true,

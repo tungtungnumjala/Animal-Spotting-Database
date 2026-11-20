@@ -1,7 +1,8 @@
+import 'dotenv/config';
+import prisma from './config/db.js';
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
-import sequelize from './config/db.js';
 import animalRoutes from './routes/animalRoutes.js';
 import spotRoutes from './routes/spotRoutes.js'
 import authRoutes from './routes/authRoutes.js';
@@ -52,7 +53,7 @@ app.get('/', (req, res) => {
 
 const startServer = async () => {
     try {
-        await sequelize.authenticate();
+        await prisma.$connect()
         console.log('Succesfully connected to server');
 
         app.listen(PORT, () => {

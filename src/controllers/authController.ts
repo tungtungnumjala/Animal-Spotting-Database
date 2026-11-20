@@ -1,13 +1,12 @@
 import type { Request, Response } from "express";
-import { UniqueConstraintError } from "sequelize";
-import User from "../models/User.js";
+import { Prisma } from "../generated/prisma/client.js";
+import prisma from "../config/db.js";
 import { hashPassWord, verifyPassword } from "../utils/password.js";
 import { uploadProfilePhoto } from "../services/profileR2Service.js";
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
     const { username, email, password } = req.body ?? {};
-
     // ตรวจชนิดข้อมูล
     if (
       typeof username !== "string" ||
@@ -23,8 +22,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     const cleanUsername = username.trim();
     const cleanEmail = email.trim().toLowerCase();
-
-    // ตรวจข้อมูลในฐานข้อมูล
+  // ตรวจข้อมูลในฐานข้อมูล
     if (cleanUsername.length < 1 || cleanUsername.length > 50) {
       res.status(400).json({
         success: false,
@@ -53,11 +51,10 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // ตรวจอีเมลซ้ำ
-    const existingUser = await User.findOne({
+    const existingUser = await prisma.user.findUnique({
       where: { email: cleanEmail },
-      attributes: ["userID"],
+      select: { userId: true },
     });
 
     if (existingUser) {
@@ -67,10 +64,8 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // Hash พร้อม salt ก่อนบันทึก
     const hashedPassword = await hashPassWord(password);
-
     // บันทึกผู้ใช้ลงตาราง user
     const values = {
       username: cleanUsername,
@@ -78,22 +73,28 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       password: hashedPassword,
       profileImage: null,
     };
+
     const photo = req.file;
     const user = photo
-      ? await User.sequelize!.transaction(async (transaction) => {
-          const created = await User.create(values, { transaction });
-          const profileImage = await uploadProfilePhoto(created.userID, photo.mimetype, photo.buffer);
-          await created.update({ profileImage }, { transaction });
-          return created;
+      ? await prisma.$transaction(async (tx) => {
+          const created = await tx.user.create({ data: values });
+          const profileImage = await uploadProfilePhoto(
+            created.userId,
+            photo.mimetype,
+            photo.buffer,
+          );
+          return tx.user.update({
+            where: { userId: created.userId },
+            data: { profileImage },
+          });
         })
-      : await User.create(values);
-
+      : await prisma.user.create({ data: values });
     // ส่งเฉพาะข้อมูลที่ต้องใช้กลับไป
     res.status(201).json({
       success: true,
       message: "Registration successful",
       data: {
-        userID: user.userID,
+        userId: user.userId,
         username: user.username,
         email: user.email,
         profileImage: user.profileImage,
@@ -101,7 +102,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     });
   } catch (error) {
     // รองรับคำขอสมัครอีเมลเดียวกันที่เข้ามาพร้อมกัน
-    if (error instanceof UniqueConstraintError) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       res.status(409).json({
         success: false,
         message: "Email is already registered",
@@ -146,17 +147,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // ตรวจอีเมลก่อน เพราะอีเมลระบุบัญชีได้ไม่ซ้ำกัน
-    let user = await User.findOne({
+    let user = await prisma.user.findUnique({
       where: { email: cleanIdentifier.toLowerCase() },
     });
-
     // ถ้าไม่พบอีเมล ให้ค้นหา username โดยไม่เลือกบัญชีที่ชื่อซ้ำ
     if (!user) {
-      const matches = await User.findAll({
+      const matches = await prisma.user.findMany({
         where: { username: cleanIdentifier },
-        limit: 2,
+        take: 2,
       });
 
       if (matches.length === 1) {
@@ -171,7 +170,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // ตรวจรหัสผ่านกับ hash ที่เก็บไว้
     const isPasswordValid = await verifyPassword(user.password, password);
 
@@ -182,7 +180,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // สร้าง session ID ใหม่
     await new Promise<void>((resolve, reject) => {
       req.session.regenerate((error) => {
@@ -190,15 +187,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
           reject(error);
           return;
         }
-
         resolve();
       });
     });
-
     // เก็บ ID ผู้ใช้ไว้ใน session
-    req.session.userID = user.userID;
+    req.session.userID = user.userId;
 
-    // 6. รอให้บันทึก session สำเร็จก่อนตอบกลับ
     await new Promise<void>((resolve, reject) => {
       req.session.save((error) => {
         if (error) {
@@ -214,7 +208,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       success: true,
       message: "Login successful",
       data: {
-        userID: user.userID,
+        userId: user.userId,
         username: user.username,
         email: user.email,
         profileImage: user.profileImage,
@@ -233,9 +227,9 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
 
   try {
     // อ่าน ID จาก session ที่ Backend เก็บไว้
-    const userID = req.session.userID;
+    const userId = req.session.userID;
 
-    if (!userID) {
+    if (!userId) {
       res.status(401).json({
         success: false,
         message: "Please log in",
@@ -244,8 +238,14 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
     }
 
     // อ่านข้อมูลล่าสุด โดยไม่ดึง password
-    const user = await User.findByPk(userID, {
-      attributes: ["userID", "username", "email", "profileImage"],
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        profileImage: true,
+      },
     });
 
     if (!user) {
@@ -258,12 +258,7 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
 
     res.status(200).json({
       success: true,
-      data: {
-        userID: user.userID,
-        username: user.username,
-        email: user.email,
-        profileImage: user.profileImage,
-      },
+      data: user,
     });
   } catch {
     res.status(500).json({
@@ -272,6 +267,7 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
     });
   }
 };
+
 export const logout = async (req: Request, res: Response): Promise<void> => {
   res.set("Cache-Control", "no-store");
 
@@ -283,11 +279,9 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
           reject(error);
           return;
         }
-
         resolve();
       });
     });
-
     // สั่งให้เบราว์เซอร์ลบ cookie ชื่อเดียวกับใน server.ts
     res.clearCookie("animal-spotting.sid", {
       path: "/",
