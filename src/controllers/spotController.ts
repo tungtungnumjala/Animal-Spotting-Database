@@ -3,7 +3,6 @@ import prisma from "../config/db.js";
 import {
   generatePresignedUrl,
   deleteFilesFromR2,
-  moveTempFilesToSpotFolder,
 } from "../services/r2ServiceSpots.js";
 
 // Helper สำหรับ Throw error ที่มี HTTP status ภายใน Prisma interactive transaction
@@ -76,7 +75,6 @@ export const getPresignedUrl = async (
       fileName,
       fileType,
       userId,
-      parsedSpotId,
     );
 
     res.status(200).json({
@@ -97,7 +95,6 @@ export const createSpot = async (
   const { title, description, address, lat, lng, photoUrls, animals, date } =
     req.body;
 
-  //ตอนที่สร้าง spot มันจะให้ spot บันทึกว่า userID ไหนเป็นคนสร้าง
   const userId = req.session.userID;
   if (!userId) {
     res.status(401).json({
@@ -108,9 +105,8 @@ export const createSpot = async (
   }
 
   try {
-    //เปิด transaction
-    const createdSpotWithDetails = await prisma.$transaction(async (tx) => {
-      const newSpot = await tx.spot.create({
+    const newSpot = await prisma.$transaction(async (tx) => {
+      const created = await tx.spot.create({
         data: {
           userId,
           title,
@@ -122,19 +118,25 @@ export const createSpot = async (
         },
       });
 
-      if (photoUrls && Array.isArray(photoUrls) && photoUrls.length > 0) {
-        const organizedUrls = await moveTempFilesToSpotFolder(
-          photoUrls,
-          userId,
-          newSpot.spotId,
-        );
+      // บันทึกรูปภาพลง DB ใน Transaction เดียวกันได้เลย
+      if (Array.isArray(photoUrls) && photoUrls.length > 0) {
+        const validUrls = [
+          ...new Set(
+            photoUrls
+              .filter((url: unknown): url is string => typeof url === "string")
+              .map((url) => url.trim())
+              .filter((url) => url.length > 0),
+          ),
+        ];
 
-        await tx.photo.createMany({
-          data: organizedUrls.map((url: string) => ({
-            spotId: newSpot.spotId,
-            photoUrl: url,
-          })),
-        });
+        if (validUrls.length > 0) {
+          await tx.photo.createMany({
+            data: validUrls.map((photoUrl) => ({
+              spotId: created.spotId,
+              photoUrl,
+            })),
+          });
+        }
       }
 
       if (animals && Array.isArray(animals) && animals.length > 0) {
@@ -153,7 +155,7 @@ export const createSpot = async (
         if (uniqueAnimalIds.length > 0) {
           await tx.spottedIn.createMany({
             data: uniqueAnimalIds.map((animalId) => ({
-              spotId: newSpot.spotId,
+              spotId: created.spotId,
               animalId,
             })),
           });
@@ -166,7 +168,7 @@ export const createSpot = async (
       }
 
       return tx.spot.findUnique({
-        where: { spotId: newSpot.spotId },
+        where: { spotId: created.spotId },
         include: {
           user: {
             select: { username: true, profileImage: true },
@@ -181,7 +183,7 @@ export const createSpot = async (
     res.status(201).json({
       success: true,
       message: "Spot created successfully",
-      data: createdSpotWithDetails,
+      data: newSpot,
     });
   } catch (error) {
     console.error("Error creating spot:", error);
@@ -265,25 +267,51 @@ export const updateSpot = async (
   const { title, description, address, lat, lng, photoUrls, animals, date } =
     req.body;
 
-  const removedUrls: string[] = [];
-
   try {
+    // 1. ค้นหา Spot เดิมและตรวจสอบสิทธิ์ความเป็นเจ้าของก่อนทำอย่างอื่น
+    const spot = await prisma.spot.findUnique({ where: { spotId } });
+
+    if (!spot) {
+      res.status(404).json({ success: false, message: "Spot not found" });
+      return;
+    }
+
+    if (spot.userId !== userId) {
+      res.status(403).json({
+        success: false,
+        message: "You do not have permission to edit this spot",
+      });
+      return;
+    }
+
+    // 2. เตรียมจัดการรูปภาพ
+    let removedUrls: string[] = [];
+    let addedUrls: string[] = [];
+    const hasPhotoUpdates = Array.isArray(photoUrls);
+
+    if (hasPhotoUpdates) {
+      const validUrls = [
+        ...new Set(
+          photoUrls
+            .filter((url: unknown): url is string => typeof url === "string")
+            .map((url) => url.trim())
+            .filter((url) => url.length > 0),
+        ),
+      ];
+
+      const existingPhotos = await prisma.photo.findMany({
+        where: { spotId },
+      });
+
+      const existingUrls = existingPhotos.map((p) => p.photoUrl);
+
+      removedUrls = existingUrls.filter((url) => !validUrls.includes(url));
+      addedUrls = validUrls.filter((url) => !existingUrls.includes(url));
+    }
+
+    // 3. เปิด Transaction อัปเดตข้อมูลทั้งหมดลง Database (ทำงานเร็วมาก ไม่มีคำสั่งเน็ตขวาง)
     const rawUpdatedSpot = await prisma.$transaction(async (tx) => {
-      // 1. ค้นหา Spot เดิมและตรวจสอบสิทธิ์ความเป็นเจ้าของ
-      const spot = await tx.spot.findUnique({ where: { spotId } });
-
-      if (!spot) {
-        throw new HttpError(404, "Spot not found");
-      }
-
-      if (spot.userId !== userId) {
-        throw new HttpError(
-          403,
-          "You do not have permission to edit this spot",
-        );
-      }
-
-      // 2. อัปเดตข้อมูลหลักของ Spot
+      // 3.1 อัปเดตข้อมูลหลักของ Spot
       await tx.spot.update({
         where: { spotId },
         data: {
@@ -297,28 +325,8 @@ export const updateSpot = async (
         },
       });
 
-      // 3. จัดการรูปภาพแบบ Differential
-      if (Array.isArray(photoUrls)) {
-        const validUrls = [
-          ...new Set(
-            photoUrls
-              .filter((url: unknown): url is string => typeof url === "string")
-              .map((url) => url.trim())
-              .filter((url) => url.length > 0),
-          ),
-        ];
-
-        const existingPhotos = await tx.photo.findMany({
-          where: { spotId },
-        });
-        const existingUrls = existingPhotos.map((p) => p.photoUrl);
-        removedUrls.push(
-          ...existingUrls.filter((url) => !validUrls.includes(url)),
-        );
-        const addedUrls = validUrls.filter(
-          (url) => !existingUrls.includes(url),
-        );
-
+      // 3.2 อัปเดตตาราง Photo
+      if (hasPhotoUpdates) {
         if (removedUrls.length > 0) {
           await tx.photo.deleteMany({
             where: { spotId, photoUrl: { in: removedUrls } },
@@ -326,18 +334,13 @@ export const updateSpot = async (
         }
 
         if (addedUrls.length > 0) {
-          const organizedAddedUrls = await moveTempFilesToSpotFolder(
-            addedUrls,
-            userId,
-            spotId,
-          );
           await tx.photo.createMany({
-            data: organizedAddedUrls.map((photoUrl) => ({ spotId, photoUrl })),
+            data: addedUrls.map((photoUrl) => ({ spotId, photoUrl })),
           });
         }
       }
 
-      // 4. จัดการสัตว์แบบ Differential
+      // 3.3 จัดการสัตว์แบบ Differential
       if (Array.isArray(animals)) {
         const newAnimalIds = [
           ...new Set(
@@ -389,7 +392,7 @@ export const updateSpot = async (
         }
       }
 
-      // 5. ดึงข้อมูลล่าสุดพร้อม include ส่งกลับไปให้หน้าบ้าน
+      // 3.4 ดึงข้อมูลล่าสุดพร้อม include ส่งกลับไปให้หน้าบ้าน
       return tx.spot.findUnique({
         where: { spotId },
         include: {
@@ -415,6 +418,7 @@ export const updateSpot = async (
       });
     });
 
+    // 4. ลบรูปเก่าที่ไม่ได้ใช้ออกจาก R2 แบบ Background
     if (removedUrls.length > 0) {
       deleteFilesFromR2(removedUrls).catch((r2Err) => {
         console.error("Warning: Failed to delete old files from R2:", r2Err);
@@ -422,15 +426,13 @@ export const updateSpot = async (
     }
 
     const updatedSpot = rawUpdatedSpot
-      ? {
-          ...(() => {
-            const { spottedIn, ...rest } = rawUpdatedSpot;
-            return {
-              ...rest,
-              animals: spottedIn.map((item) => item.animal),
-            };
-          })(),
-        }
+      ? (() => {
+          const { spottedIn, ...rest } = rawUpdatedSpot;
+          return {
+            ...rest,
+            animals: spottedIn.map((item) => item.animal),
+          };
+        })()
       : null;
 
     res.status(200).json({
