@@ -1,0 +1,91 @@
+// npx prisma migrate dev --name ชื่อที่แก้ อัปเดตตารางจริงใน MySQL
+// npx prisma generate อัปเดตโค้ดใน src/generated/prisma
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model User {
+  userId       Int       @id @default(autoincrement()) @map("user_id")
+  username     String    @db.VarChar(50)
+  email        String    @unique @db.VarChar(100)
+  password     String    @db.VarChar(255)
+  profileImage String?   @map("profile_image") @db.VarChar(255)
+  createdAt    DateTime? @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+
+  spots        Spot[]
+
+  @@map("user")
+}
+
+model Category {
+  categoryId Int      @id @default(autoincrement()) @map("category_id")
+  name       String   @map("category_name") @db.VarChar(50)
+
+  animals    Animal[]
+
+  @@map("category")
+}
+
+model Animal {
+  animalId       Int         @id @default(autoincrement()) @map("animal_id")
+  categoryId     Int         @map("category_id")
+  name           String      @db.VarChar(50)
+  animalImagePin String      @map("animal_image_pin") @db.VarChar(255)
+  spotsCount     Int         @default(0) @map("spots_count")
+  createdAt      DateTime?   @default(now()) @map("created_at")
+  updatedAt      DateTime?   @updatedAt @map("updated_at")
+
+  category       Category    @relation(fields: [categoryId], references: [categoryId])
+  spottedIn      SpottedIn[]
+
+  @@map("animal")
+}
+
+model Spot {
+  spotId      Int         @id @default(autoincrement()) @map("spot_id")
+  userId      Int         @map("user_id")
+  title       String      @db.VarChar(100)
+  description String?     @db.Text
+  address     String      @db.Text
+  latitude    Decimal     @db.Decimal(10, 8)
+  longitude   Decimal     @db.Decimal(11, 8)
+  date        DateTime?   @db.Date
+  createdAt   DateTime?   @default(now()) @map("created_at")
+  updatedAt   DateTime?   @updatedAt @map("updated_at")
+
+  user        User        @relation(fields: [userId], references: [userId])
+  photos      Photo[]
+  spottedIn   SpottedIn[]
+
+  @@map("spot")
+}
+
+model Photo {
+  photoId   Int       @id @default(autoincrement()) @map("photo_id")
+  spotId    Int       @map("spot_id")
+  photoUrl  String    @map("photo_url") @db.VarChar(255)
+  createdAt DateTime? @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+
+  spot      Spot      @relation(fields: [spotId], references: [spotId], onDelete: Cascade)
+
+  @@map("photo")
+}
+
+model SpottedIn {
+  spotId   Int    @map("spot_id")
+  animalId Int    @map("animal_id")
+
+  spot     Spot   @relation(fields: [spotId], references: [spotId], onDelete: Cascade)
+  animal   Animal @relation(fields: [animalId], references: [animalId], onDelete: Cascade)
+
+  @@id([spotId, animalId])
+  @@map("spotted_in")
+}

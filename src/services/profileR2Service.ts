@@ -13,7 +13,6 @@ function createProfileUpload(userID: number, fileType: string) {
   const extension = PROFILE_IMAGE_EXTENSIONS[fileType];
   if (!extension) throw new Error("Unsupported profile image type");
 
-
   const bucket = process.env.R2_BUCKET_NAMEProfile;
   const endpoint = process.env.R2_ENDPOINTProfile;
   const accessKeyId = process.env.R2_ACCESS_KEY_IDProfile;
