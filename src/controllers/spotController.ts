@@ -171,7 +171,7 @@ export const createSpot = async (
         where: { spotId: created.spotId },
         include: {
           user: {
-            select: { username: true, profileImage: true },
+            select: { userId: true, username: true, profileImage: true },
           },
           photos: {
             select: { photoId: true, photoUrl: true },
@@ -215,7 +215,7 @@ export const getAllSpots = async (
           },
         },
         user: {
-          select: { userId: true, username: true },
+          select: { userId: true, username: true, profileImage: true },
         },
       },
       orderBy: { createdAt: "desc" },
@@ -309,7 +309,7 @@ export const updateSpot = async (
       addedUrls = validUrls.filter((url) => !existingUrls.includes(url));
     }
 
-    // 3. เปิด Transaction อัปเดตข้อมูลทั้งหมดลง Database (ทำงานเร็วมาก ไม่มีคำสั่งเน็ตขวาง)
+    // 3. เปิด Transaction อัปเดตข้อมูลทั้งหมดลง Database
     const rawUpdatedSpot = await prisma.$transaction(async (tx) => {
       // 3.1 อัปเดตข้อมูลหลักของ Spot
       await tx.spot.update({
@@ -412,7 +412,7 @@ export const updateSpot = async (
             },
           },
           user: {
-            select: { userId: true, username: true },
+            select: { userId: true, username: true, profileImage: true },
           },
         },
       });

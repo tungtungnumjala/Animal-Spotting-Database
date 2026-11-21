@@ -22,7 +22,12 @@ export const generatePresignedUrl = async (
   userId: number,
 ) => {
   const folder = `spots/${userId}`;
-  const uniqueFileName = `${folder}/${Date.now()}-${fileName}`;
+    // ทำความสะอาดชื่อไฟล์: แทนที่ช่องว่างด้วยขีดล่าง และตัดอักขระพิเศษเพื่อป้องกัน URL พัง
+  const sanitizedFileName = fileName
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9._-]/g, "");
+  const uniqueFileName = `spots/${Date.now()}-${sanitizedFileName || "photo.jpg"}`;
 
   // สร้าง command หาที่ลงผ่าน uniqueFileName ที่เเบ่ง directory ตาม / เตรียมส่ง uploadUrl ไปให้ frontend ว่ารูปนั้นจะลงที่ไหน
   const command = new PutObjectCommand({
