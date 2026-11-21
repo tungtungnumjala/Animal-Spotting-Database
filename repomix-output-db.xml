@@ -151,15 +151,6 @@ src/
     spotController.ts
   middleware/
     registerPhotoUpload.ts
-  models/
-    Relation/
-      Animal.ts
-      Category.ts
-      Photo.ts
-      SpottedIn.ts
-      Spot.ts
-      User.ts
-    index.ts
   routes/
     animalRoutes.ts
     authRoutes.ts
@@ -9964,6 +9955,9 @@ Follow `references/schema-changes.md` and `references/driver-adapters.md` first,
 </file>
 
 <file path="prisma/schema.prisma">
+npx prisma migrate dev --name ชื่อที่แก้ อัปเดตตารางจริงใน MySQL
+npx prisma generate อัปเดตโค้ดใน src/generated/prisma
+
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -10051,6 +10045,47 @@ model SpottedIn {
 
   @@id([spotId, animalId])
   @@map("spotted_in")
+}
+</file>
+
+<file path="src/routes/animalRoutes.ts">
+import { Router } from 'express';
+import { getAllAnimals } from '../controllers/animalController.js';
+
+const router = Router();
+
+router.get('/', getAllAnimals);
+
+export default router;
+</file>
+
+<file path="src/types/express-session.d.ts">
+import 'express-session';
+
+declare module 'express-session' {
+    interface SessionData {
+        userID?: number;
+    }
+}
+</file>
+
+<file path="src/utils/password.ts">
+import * as argon2 from 'argon2';
+
+export async function hashPassWord(password: string): Promise<string> {
+    return argon2.hash(password, {
+        type: argon2.argon2id,
+        memoryCost: 19456,
+        timeCost: 2,
+        parallelism: 1,
+    });
+}
+
+export async function verifyPassword(
+    hashedPassword: string,
+    password: string,
+): Promise<boolean> {
+    return argon2.verify(hashedPassword, password);
 }
 </file>
 
@@ -10166,7 +10201,7 @@ export default prisma;
 
 <file path="src/controllers/passwordController.ts">
 import type { Request, Response } from "express";
-import {User} from "../models/index.js";
+import prisma from "../config/db.js";
 import { hashPassWord, verifyPassword } from "../utils/password.js";
 
 export const changePassword = async (req: Request, res: Response): Promise<void> => {
@@ -10196,8 +10231,10 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
   }
 
   try {
-    // ใช้บัญชีจาก session เท่านั้น ไม่รับ userId จากฟอร์ม
-    const user = await User.findByPk(userId, { attributes: ["userId", "password"] });
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true, password: true },
+    });
     if (!user) {
       res.status(401).json({ success: false, message: "Please log in" });
       return;
@@ -10208,12 +10245,13 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
     }
 
     const password = await hashPassWord(newPassword);
-    // ป้องกันคำขอพร้อมกันเขียนทับรหัสที่เพิ่งเปลี่ยนไปแล้ว
-    const [updated] = await User.update({ password }, {
+    // ใช้ updateMany เพื่อเช็กเงื่อนไข password เดิมป้องกัน race condition แบบเดียวกับ Sequelize
+    const result = await prisma.user.updateMany({
       where: { userId, password: user.password },
-      fields: ["password"],
+      data: { password },
     });
-    if (updated !== 1) {
+
+    if (result.count !== 1) {
       res.status(409).json({ success: false, field: "currentPassword", message: "Your password has changed. Please enter your current password and try again." });
       return;
     }
@@ -10225,447 +10263,85 @@ export const changePassword = async (req: Request, res: Response): Promise<void>
 };
 </file>
 
-<file path="src/models/Relation/Category.ts">
-import { DataTypes, Model } from 'sequelize';
-import type {
-  InferAttributes,
-  InferCreationAttributes,
-  CreationOptional,
-} from 'sequelize';
-import sequelize from '../../config/db.js';
-
-class Category extends Model<
-  InferAttributes<Category>,
-  InferCreationAttributes<Category>
-> {
-  declare categoryId: CreationOptional<number>;
-  declare name: string;
-}
-
-Category.init(
-  {
-    categoryId: {
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
-      primaryKey: true,
-      field: 'category_id',
-    },
-    name: {
-      type: DataTypes.STRING(50),
-      allowNull: false,
-      field: 'category_name', // ตรงกับ SQL: category_name
-    },
-  },
-  {
-    sequelize,
-    tableName: 'category',
-    timestamps: false,
-    underscored: true,
-  },
-);
-
-export default Category;
-</file>
-
-<file path="src/models/Relation/Photo.ts">
-import { DataTypes, Model } from 'sequelize';
-import type {
-  InferAttributes,
-  InferCreationAttributes,
-  CreationOptional,
-} from 'sequelize';
-import sequelize from '../../config/db.js';
-
-class Photo extends Model<
-  InferAttributes<Photo>,
-  InferCreationAttributes<Photo>
-> {
-  declare photoId: CreationOptional<number>;
-  declare spotId: number;
-  declare photoUrl: string;
-  declare createdAt: CreationOptional<Date>;
-  declare updatedAt: CreationOptional<Date>;
-}
-
-Photo.init(
-  {
-    photoId: {
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
-      primaryKey: true,
-      field: 'photo_id',
-    },
-    spotId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: 'spot_id',
-    },
-    photoUrl: {
-      type: DataTypes.STRING(255),
-      allowNull: false,
-      field: 'photo_url',
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      field: 'created_at',
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      field: 'updated_at',
-    },
-  },
-  {
-    sequelize,
-    tableName: 'photo',
-    timestamps: true,
-    underscored: true,
-  },
-);
-
-export default Photo;
-</file>
-
-<file path="src/models/Relation/SpottedIn.ts">
-import { DataTypes, Model } from 'sequelize';
-import type {
-  InferAttributes,
-  InferCreationAttributes,
-  CreationOptional,
-} from 'sequelize';
-import sequelize from '../../config/db.js';
-
-class SpottedIn extends Model<
-  InferAttributes<SpottedIn>,
-  InferCreationAttributes<SpottedIn>
-> {
-  declare spotId: number;
-  declare animalId: number;
-}
-
-SpottedIn.init(
-  {
-    spotId: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      allowNull: false,
-      field: 'spot_id',
-    },
-    animalId: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      allowNull: false,
-      field: 'animal_id',
-    },
-  },
-  {
-    sequelize,
-    tableName: 'spotted_in',
-    timestamps: false,
-    underscored: true,
-  },
-);
-
-export default SpottedIn;
-</file>
-
-<file path="src/models/Relation/Spot.ts">
-import { DataTypes, Model } from 'sequelize';
-import type {
-  InferAttributes,
-  InferCreationAttributes,
-  CreationOptional,
-} from 'sequelize';
-import sequelize from '../../config/db.js';
-
-class Spot extends Model<
-  InferAttributes<Spot>,
-  InferCreationAttributes<Spot>
-> {
-  declare spotId: CreationOptional<number>;
-  declare userId: number;
-  declare title: string;
-  declare description: CreationOptional<string | null>;
-  declare address: string;
-  declare latitude: number;
-  declare longitude: number;
-  declare date: CreationOptional<string | null>;
-  declare createdAt: CreationOptional<Date>;
-  declare updatedAt: CreationOptional<Date>;
-}
-
-Spot.init(
-  {
-    spotId: {
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
-      primaryKey: true,
-      field: 'spot_id',
-    },
-    userId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: 'user_id',
-    },
-    title: {
-      type: DataTypes.STRING(100),
-      allowNull: false,
-    },
-    description: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-    },
-    address: {
-      type: DataTypes.TEXT,
-      allowNull: false,
-    },
-    latitude: {
-      type: DataTypes.DECIMAL(10, 8),
-      allowNull: false,
-    },
-    longitude: {
-      type: DataTypes.DECIMAL(11, 8),
-      allowNull: false,
-    },
-    date: {
-      type: DataTypes.DATEONLY,
-      allowNull: true,
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      field: 'created_at',
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      field: 'updated_at',
-    },
-  },
-  {
-    sequelize,
-    tableName: 'spot',
-    timestamps: true,
-    underscored: true,
-  },
-);
-
-export default Spot;
-</file>
-
-<file path="src/models/Relation/User.ts">
+<file path="src/middleware/registerPhotoUpload.ts">
+import type { RequestHandler } from "express";
+import multer from "multer";
 import {
-  DataTypes,
-  Model,
-  type InferAttributes,
-  type InferCreationAttributes,
-  type CreationOptional,
-} from 'sequelize';
-import sequelize from '../../config/db.js';
+  MAX_PROFILE_PHOTO_SIZE,
+  PROFILE_IMAGE_EXTENSIONS,
+} from "../services/profileR2Service.js";
 
-class User extends Model<
-  InferAttributes<User>,
-  InferCreationAttributes<User>
-> {
-  declare userId: CreationOptional<number>;
-  declare username: string;
-  declare email: string;
-  declare password: string;
-  declare profileImage: CreationOptional<string | null>;
-  declare createdAt: CreationOptional<Date>;
-  declare updatedAt: CreationOptional<Date>;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_PROFILE_PHOTO_SIZE, files: 1, fields: 3, parts: 4, fieldSize: 1024 },
+  fileFilter: (_req, file, callback) => {
+    if (!Object.hasOwn(PROFILE_IMAGE_EXTENSIONS, file.mimetype)) {
+      callback(new Error("Choose a PNG, JPEG or WebP photo under 2 MB."));
+      return;
+    }
+    callback(null, true);
+  },
+}).single("profileImage");
+
+function matchesImageType(file: Express.Multer.File): boolean {
+  const bytes = file.buffer;
+  if (file.mimetype === "image/png") {
+    return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  }
+  if (file.mimetype === "image/jpeg") {
+    return bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  }
+  return file.mimetype === "image/webp" && bytes.length >= 12 &&
+    bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
 }
 
-User.init(
-  {
-    userId: {
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
-      primaryKey: true,
-      field: 'user_id',
-    },
-    username: {
-      type: DataTypes.STRING(50),
-      allowNull: false,
-      validate: { notEmpty: true },
-    },
-    email: {
-      type: DataTypes.STRING(100),
-      allowNull: false,
-      unique: true,
-      validate: { isEmail: true },
-    },
-    password: {
-      type: DataTypes.STRING(255),
-      allowNull: false,
-    },
-    profileImage: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-      field: 'profile_image',
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      field: 'created_at',
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      field: 'updated_at',
-    },
-  },
-  {
-    sequelize,
-    tableName: 'user',
-    timestamps: false,
-    underscored: true,
-  },
-);
+export const registerPhotoUpload: RequestHandler = (req, res, next) => {
+  // คำขอ JSON ที่ไม่มีรูปยังใช้ Register แบบเดิมได้
+  upload(req, res, (error: unknown) => {
+    if (error) {
+      const tooLarge = error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE";
+      res.status(tooLarge ? 413 : 400).json({
+        success: false,
+        message: tooLarge ? "Choose a profile photo under 2 MB." : "Invalid registration form or profile photo.",
+      });
+      return;
+    }
 
-export default User;
+    if (req.file && !matchesImageType(req.file)) {
+      res.status(400).json({ success: false, message: "The profile photo must be a PNG, JPEG or WebP image." });
+      return;
+    }
+    next();
+  });
+};
 </file>
 
-<file path="src/models/index.ts">
-import Spot from './Relation/Spot.js';
-import Photo from './Relation/Photo.js';
-import Animal from './Relation/Animal.js';
-import Category from './Relation/Category.js';
-import SpottedIn from './Relation/SpottedIn.js';
-import User from './Relation/User.js';
-
-// Spot 1:N Photo
-Spot.hasMany(Photo, { foreignKey: 'spotId', as: 'photos' });
-Photo.belongsTo(Spot, { foreignKey: 'spotId', as: 'spot' });
-
-// Spot M:N Animal (ผ่าน spotted_in)
-Spot.belongsToMany(Animal, {
-  through: SpottedIn,
-  foreignKey: 'spotId',
-  otherKey: 'animalId',
-  as: 'animals',
-});
-Animal.belongsToMany(Spot, {
-  through: SpottedIn,
-  foreignKey: 'animalId',
-  otherKey: 'spotId',
-  as: 'spots',
-});
-
-// Category 1:N Animal
-Category.hasMany(Animal, { foreignKey: 'categoryId', as: 'animals'});
-Animal.belongsTo(Category, { foreignKey: 'categoryId', as: 'category' });
-
-// User 1:N Spot
-User.hasMany(Spot, { foreignKey: 'userId', as: 'spots' });
-Spot.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-
-export { User, Spot, Photo, Animal, SpottedIn, Category };
-</file>
-
-<file path="src/routes/animalRoutes.ts">
-import { Router } from 'express';
-import { getAllAnimals } from '../controllers/animalController.js';
+<file path="src/routes/collectionRoutes.ts">
+import { Router } from "express";
+import { getMySpots } from "../controllers/collectionController.js";
 
 const router = Router();
 
-router.get('/', getAllAnimals);
+router.get("/", getMySpots);
 
 export default router;
 </file>
 
-<file path="src/services/r2ServiceSpots.ts">
-import { S3Client, PutObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import dotenv from 'dotenv';
+<file path="src/routes/spotRoutes.ts">
+import { Router } from 'express';
+import { getPresignedUrl, createSpot, getAllSpots, updateSpot, deleteSpot } from '../controllers/spotController.js';
 
-// ตั้งค่าเชื่อม cloudfare
-const s3Client = new S3Client({
-  region: "auto",
-  endpoint: process.env.R2_ENDPOINT || "",
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
-  },
-});
+const router = Router();
 
-export const generatePresignedUrl = async (fileName: string, fileType: string) => {
-  const uniqueFileName = `spots/${Date.now()}-${fileName}`;
+router.post('/presigned-url', getPresignedUrl);
+router.post('/', createSpot);
 
-  // สร้างคำสั่งสำหรับ upload ลง cloudfare
-  const command = new PutObjectCommand({
-    Bucket: process.env.R2_BUCKET_NAME,
-    Key: uniqueFileName,
-    ContentType: fileType,
-  });
+router.get('/', getAllSpots);
 
-  const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
+router.put('/:spotId', updateSpot);
 
-  return {
-    uploadUrl, // ลิงก์เอาไว้ upload ส่งไป frontend 
-    publicUrl: `${process.env.R2_PUBLIC_URL?.replace(/\/+$/, "")}/${uniqueFileName}`, 
-  };
-};
-
-// ฟังก์ชันสำหรับลบไฟล์บน R2
-export const deleteFilesFromR2 = async (
-  publicUrls: string[],
-): Promise<void> => {
-  if (!publicUrls || publicUrls.length === 0) return;
-
-  const baseUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "") || "";
-
-  // แปลง publicUrl กลับเป็น Key (เช่น "spots/1700000000-cat.jpg")
-  const keys = publicUrls
-    .map((url) => {
-      if (baseUrl && url.startsWith(baseUrl)) {
-        return url.slice(baseUrl.length).replace(/^\/+/, "");
-      }
-      try {
-        return decodeURIComponent(new URL(url).pathname.replace(/^\/+/, ""));
-      } catch {
-        return null;
-      }
-    })
-    .filter((key): key is string => Boolean(key));
-
-  if (keys.length === 0) return;
-
-  const command = new DeleteObjectsCommand({
-    Bucket: process.env.R2_BUCKET_NAME,
-    Delete: {
-      Objects: keys.map((Key) => ({ Key })),
-      Quiet: true,
-    },
-  });
-
-  await s3Client.send(command);
-};
-</file>
-
-<file path="src/types/express-session.d.ts">
-import 'express-session';
-
-declare module 'express-session' {
-    interface SessionData {
-        userID?: number;
-    }
-}
-</file>
-
-<file path="src/utils/password.ts">
-import * as argon2 from 'argon2';
-
-export async function hashPassWord(password: string): Promise<string> {
-    return argon2.hash(password, {
-        type: argon2.argon2id,
-        memoryCost: 19456,
-        timeCost: 2,
-        parallelism: 1,
-    });
-}
-
-export async function verifyPassword(
-    hashedPassword: string,
-    password: string,
-): Promise<boolean> {
-    return argon2.verify(hashedPassword, password);
-}
+router.delete('/:spotId', deleteSpot);
+export default router;
 </file>
 
 <file path=".gitignore">
@@ -10787,16 +10463,16 @@ dist/
 
 <file path="src/controllers/animalController.ts">
 import type { Request, Response } from 'express';
-import Animal from '../models/Relation/Animal.js';
+import prisma from '../config/db.js';
 
 export const getAllAnimals = async (req: Request, res: Response): Promise<void> => {
   try {
-    const animals = await Animal.findAll({
-      order: [['spotsCount', 'DESC']], 
+    const animals = await prisma.animal.findMany({
+      orderBy: { spotsCount: 'desc' },
     });
     res.status(200).json({
       success: true,
-      message: 'Successfully fetched animals',  
+      message: 'Successfully fetched animals',
       data: animals,
     });
   } catch (error) {
@@ -10811,7 +10487,7 @@ export const getAllAnimals = async (req: Request, res: Response): Promise<void> 
 
 <file path="src/controllers/collectionController.ts">
 import type { Request, Response } from "express";
-import { Spot, Photo, Animal } from "../models/index.js";
+import prisma from "../config/db.js";
 
 export const getMySpots = async (
   req: Request,
@@ -10826,30 +10502,35 @@ export const getMySpots = async (
     });
     return;
   }
+
   try {
-    const spots = await Spot.findAll({
+    const rawSpots = await prisma.spot.findMany({
       where: { userId },
-      include: [
-        {
-          model: Photo,
-          as: "photos",
-          attributes: ["photoId", "photoUrl"],
+      include: {
+        photos: {
+          select: { photoId: true, photoUrl: true },
         },
-        {
-          model: Animal,
-          as: "animals",
-          attributes: [
-            "animalId",
-            "categoryId",
-            "name",
-            "animalImagePin",
-            "spotsCount",
-          ],
-          through: { attributes: [] }, 
+        spottedIn: {
+          select: {
+            animal: {
+              select: {
+                animalId: true,
+                categoryId: true,
+                name: true,
+                animalImagePin: true,
+                spotsCount: true,
+              },
+            },
+          },
         },
-      ],
-      order: [["createdAt", "DESC"]],
+      },
+      orderBy: { createdAt: "desc" },
     });
+
+    const spots = rawSpots.map(({ spottedIn, ...spot }) => ({
+      ...spot,
+      animals: spottedIn.map((item) => item.animal),
+    }));
 
     res.status(200).json({
       success: true,
@@ -10869,8 +10550,8 @@ export const getMySpots = async (
 
 <file path="src/controllers/profileController.ts">
 import type { Request, Response } from "express";
-import { UniqueConstraintError } from "sequelize";
-import { User } from "../models/index.js";
+import { Prisma } from "../generated/prisma/client.js";
+import prisma from "../config/db.js";
 import {
   generateProfilePresignedUrl,
   MAX_PROFILE_PHOTO_SIZE,
@@ -10902,7 +10583,10 @@ export const getProfilePhotoUploadUrl = async (req: Request, res: Response): Pro
   }
 
   try {
-    const user = await User.findByPk(userId, { attributes: ["userId"] });
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true },
+    });
     if (!user) {
       res.status(401).json({ success: false, message: "Please log in" });
       return;
@@ -10971,18 +10655,18 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
   }
 
   try {
-
-    const user = await User.findByPk(userId, {
-      attributes: ["userId", "username", "email", "profileImage"],
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true, username: true, email: true, profileImage: true },
     });
     if (!user) {
       res.status(401).json({ success: false, message: "Please log in" });
       return;
     }
 
-    const emailOwner = await User.findOne({
+    const emailOwner = await prisma.user.findUnique({
       where: { email: cleanEmail },
-      attributes: ["userId"],
+      select: { userId: true },
     });
     if (emailOwner && emailOwner.userId !== user.userId) {
       res.status(409).json({ success: false, message: "Email is already registered" });
@@ -10990,9 +10674,9 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
     }
 
     if (cleanUsername !== user.username) {
-      const usernameOwner = await User.findOne({
+      const usernameOwner = await prisma.user.findFirst({
         where: { username: cleanUsername },
-        attributes: ["userId"],
+        select: { userId: true },
       });
       if (usernameOwner && usernameOwner.userId !== user.userId) {
         res.status(409).json({ success: false, message: "Username is already taken" });
@@ -11000,24 +10684,28 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
       }
     }
 
-    await user.update({
-      username: cleanUsername,
-      email: cleanEmail,
-      ...(cleanImage !== undefined ? { profileImage: cleanImage } : {}),
-    }, { fields: ["username", "email", "profileImage"] });
+    const updatedUser = await prisma.user.update({
+      where: { userId },
+      data: {
+        username: cleanUsername,
+        email: cleanEmail,
+        ...(cleanImage !== undefined ? { profileImage: cleanImage } : {}),
+      },
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        profileImage: true,
+      },
+    });
 
     res.status(200).json({
       success: true,
       message: "Profile updated successfully",
-      data: {
-        userId: user.userId,
-        username: user.username,
-        email: user.email,
-        profileImage: user.profileImage,
-      },
+      data: updatedUser,
     });
   } catch (error) {
-    if (error instanceof UniqueConstraintError) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       res.status(409).json({ success: false, message: "Email is already registered" });
       return;
     }
@@ -11026,171 +10714,95 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
 };
 </file>
 
-<file path="src/middleware/registerPhotoUpload.ts">
-import type { RequestHandler } from "express";
-import multer from "multer";
+<file path="src/services/r2ServiceSpots.ts">
 import {
-  MAX_PROFILE_PHOTO_SIZE,
-  PROFILE_IMAGE_EXTENSIONS,
-} from "../services/profileR2Service.js";
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectsCommand,
+  CopyObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_PROFILE_PHOTO_SIZE, files: 1, fields: 3, parts: 4, fieldSize: 1024 },
-  fileFilter: (_req, file, callback) => {
-    if (!Object.hasOwn(PROFILE_IMAGE_EXTENSIONS, file.mimetype)) {
-      callback(new Error("Choose a PNG, JPEG or WebP photo under 2 MB."));
-      return;
-    }
-    callback(null, true);
+// ตั้งค่าเชื่อม cloudfare
+const s3Client = new S3Client({
+  region: "auto",
+  endpoint: process.env.R2_ENDPOINT || "",
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
   },
-}).single("profileImage");
+});
 
-function matchesImageType(file: Express.Multer.File): boolean {
-  const bytes = file.buffer;
-  if (file.mimetype === "image/png") {
-    return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  }
-  if (file.mimetype === "image/jpeg") {
-    return bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-  }
-  return file.mimetype === "image/webp" && bytes.length >= 12 &&
-    bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
-}
+export const generatePresignedUrl = async (
+  fileName: string,
+  fileType: string,
+  userId: number,
+) => {
+  const folder = `spots/${userId}`;
+  const uniqueFileName = `${folder}/${Date.now()}-${fileName}`;
 
-export const registerPhotoUpload: RequestHandler = (req, res, next) => {
-  // คำขอ JSON ที่ไม่มีรูปยังใช้ Register แบบเดิมได้
-  upload(req, res, (error: unknown) => {
-    if (error) {
-      const tooLarge = error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE";
-      res.status(tooLarge ? 413 : 400).json({
-        success: false,
-        message: tooLarge ? "Choose a profile photo under 2 MB." : "Invalid registration form or profile photo.",
-      });
-      return;
-    }
-
-    if (req.file && !matchesImageType(req.file)) {
-      res.status(400).json({ success: false, message: "The profile photo must be a PNG, JPEG or WebP image." });
-      return;
-    }
-    next();
+  // สร้าง command หาที่ลงผ่าน uniqueFileName ที่เเบ่ง directory ตาม / เตรียมส่ง uploadUrl ไปให้ frontend ว่ารูปนั้นจะลงที่ไหน
+  const command = new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET_NAME,
+    Key: uniqueFileName,
+    ContentType: fileType,
   });
+
+  const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
+
+  return {
+    uploadUrl,
+    // ตัว url ที่โยงไปหารูปที่ลงไปใน uploadUrl ก่อนหน้า
+    publicUrl: `${process.env.R2_PUBLIC_URL?.replace(/\/+$/, "")}/${uniqueFileName}`,
+  };
 };
-</file>
 
-<file path="src/models/Relation/Animal.ts">
-import { DataTypes, Model } from 'sequelize';
-import type {
-  InferAttributes,
-  InferCreationAttributes,
-  CreationOptional,
-} from 'sequelize';
-import sequelize from '../../config/db.js';
+// ฟังก์ชันสำหรับลบไฟล์บน R2
+export const deleteFilesFromR2 = async (
+  publicUrls: string[],
+): Promise<void> => {
+  if (!publicUrls || publicUrls.length === 0) return;
 
-class Animal extends Model<
-  InferAttributes<Animal>,
-  InferCreationAttributes<Animal>
-> {
-  declare animalId: CreationOptional<number>;
-  declare categoryId: number;
-  declare name: string;
-  declare animalImagePin: string;
-  declare spotsCount: CreationOptional<number>;
-  declare createdAt: CreationOptional<Date>;
-  declare updatedAt: CreationOptional<Date>;
-}
+  const baseUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "") || "";
 
-Animal.init(
-  {
-    animalId: {
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
-      primaryKey: true,
-      field: 'animal_id',
+  // แปลง publicUrl กลับเป็น Key (เช่น "spots/1700000000-cat.jpg")
+  const keys = publicUrls
+    .map((url) => {
+      if (baseUrl && url.startsWith(baseUrl)) {
+        return url.slice(baseUrl.length).replace(/^\/+/, "");
+      }
+      try {
+        return decodeURIComponent(new URL(url).pathname.replace(/^\/+/, ""));
+      } catch {
+        return null;
+      }
+    })
+    .filter((key): key is string => Boolean(key));
+
+  if (keys.length === 0) return;
+
+  const command = new DeleteObjectsCommand({
+    Bucket: process.env.R2_BUCKET_NAME,
+    Delete: {
+      Objects: keys.map((Key) => ({ Key })),
+      Quiet: true,
     },
-    categoryId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      field: 'category_id',
-    },
-    name: {
-      type: DataTypes.STRING(50),
-      allowNull: false,
-    },
-    animalImagePin: {
-      type: DataTypes.STRING(255),
-      allowNull: false,
-      field: 'animal_image_pin',
-    },
-    spotsCount: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 0,
-      field: 'spots_count',
-      validate: {
-        min: 0,
-      },
-    },
-    createdAt: {
-      type: DataTypes.DATE,
-      field: 'created_at',
-    },
-    updatedAt: {
-      type: DataTypes.DATE,
-      field: 'updated_at',
-    },
-  },
-  {
-    sequelize,
-    tableName: 'animal',
-    timestamps: true,
-    underscored: true,
-  },
-);
+  });
 
-export default Animal;
-</file>
-
-<file path="src/routes/collectionRoutes.ts">
-import { Router } from "express";
-import { getMySpots } from "../controllers/collectionController.js";
-
-const router = Router();
-
-router.get("/", getMySpots);
-
-export default router;
-</file>
-
-<file path="src/routes/spotRoutes.ts">
-import { Router } from 'express';
-import { getPresignedUrl, createSpot, getAllSpots, updateSpot, deleteSpot } from '../controllers/spotController.js';
-
-const router = Router();
-
-router.post('/presigned-url', getPresignedUrl);
-router.post('/', createSpot);
-
-router.get('/', getAllSpots);
-
-router.put('/:spotId', updateSpot);
-
-router.delete('/:spotId', deleteSpot);
-export default router;
+  await s3Client.send(command);
+};
 </file>
 
 <file path="src/controllers/authController.ts">
 import type { Request, Response } from "express";
-import { UniqueConstraintError } from "sequelize";
-import {User} from "../models/index.js";
+import { Prisma } from "../generated/prisma/client.js";
+import prisma from "../config/db.js";
 import { hashPassWord, verifyPassword } from "../utils/password.js";
 import { uploadProfilePhoto } from "../services/profileR2Service.js";
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
     const { username, email, password } = req.body ?? {};
-
     // ตรวจชนิดข้อมูล
     if (
       typeof username !== "string" ||
@@ -11206,8 +10818,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 
     const cleanUsername = username.trim();
     const cleanEmail = email.trim().toLowerCase();
-
-    // ตรวจข้อมูลในฐานข้อมูล
+  // ตรวจข้อมูลในฐานข้อมูล
     if (cleanUsername.length < 1 || cleanUsername.length > 50) {
       res.status(400).json({
         success: false,
@@ -11236,11 +10847,10 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // ตรวจอีเมลซ้ำ
-    const existingUser = await User.findOne({
+    const existingUser = await prisma.user.findUnique({
       where: { email: cleanEmail },
-      attributes: ["userId"],
+      select: { userId: true },
     });
 
     if (existingUser) {
@@ -11250,10 +10860,8 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // Hash พร้อม salt ก่อนบันทึก
     const hashedPassword = await hashPassWord(password);
-
     // บันทึกผู้ใช้ลงตาราง user
     const values = {
       username: cleanUsername,
@@ -11261,16 +10869,22 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       password: hashedPassword,
       profileImage: null,
     };
+
     const photo = req.file;
     const user = photo
-      ? await User.sequelize!.transaction(async (transaction) => {
-          const created = await User.create(values, { transaction });
-          const profileImage = await uploadProfilePhoto(created.userId, photo.mimetype, photo.buffer);
-          await created.update({ profileImage }, { transaction });
-          return created;
+      ? await prisma.$transaction(async (tx) => {
+          const created = await tx.user.create({ data: values });
+          const profileImage = await uploadProfilePhoto(
+            created.userId,
+            photo.mimetype,
+            photo.buffer,
+          );
+          return tx.user.update({
+            where: { userId: created.userId },
+            data: { profileImage },
+          });
         })
-      : await User.create(values);
-
+      : await prisma.user.create({ data: values });
     // ส่งเฉพาะข้อมูลที่ต้องใช้กลับไป
     res.status(201).json({
       success: true,
@@ -11284,7 +10898,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     });
   } catch (error) {
     // รองรับคำขอสมัครอีเมลเดียวกันที่เข้ามาพร้อมกัน
-    if (error instanceof UniqueConstraintError) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       res.status(409).json({
         success: false,
         message: "Email is already registered",
@@ -11329,17 +10943,15 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // ตรวจอีเมลก่อน เพราะอีเมลระบุบัญชีได้ไม่ซ้ำกัน
-    let user = await User.findOne({
+    let user = await prisma.user.findUnique({
       where: { email: cleanIdentifier.toLowerCase() },
     });
-
     // ถ้าไม่พบอีเมล ให้ค้นหา username โดยไม่เลือกบัญชีที่ชื่อซ้ำ
     if (!user) {
-      const matches = await User.findAll({
+      const matches = await prisma.user.findMany({
         where: { username: cleanIdentifier },
-        limit: 2,
+        take: 2,
       });
 
       if (matches.length === 1) {
@@ -11354,7 +10966,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // ตรวจรหัสผ่านกับ hash ที่เก็บไว้
     const isPasswordValid = await verifyPassword(user.password, password);
 
@@ -11365,7 +10976,6 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
     // สร้าง session ID ใหม่
     await new Promise<void>((resolve, reject) => {
       req.session.regenerate((error) => {
@@ -11373,15 +10983,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
           reject(error);
           return;
         }
-
         resolve();
       });
     });
-
     // เก็บ ID ผู้ใช้ไว้ใน session
     req.session.userID = user.userId;
 
-    // 6. รอให้บันทึก session สำเร็จก่อนตอบกลับ
     await new Promise<void>((resolve, reject) => {
       req.session.save((error) => {
         if (error) {
@@ -11427,8 +11034,14 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
     }
 
     // อ่านข้อมูลล่าสุด โดยไม่ดึง password
-    const user = await User.findByPk(userId, {
-      attributes: ["userId", "username", "email", "profileImage"],
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        profileImage: true,
+      },
     });
 
     if (!user) {
@@ -11441,12 +11054,7 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
 
     res.status(200).json({
       success: true,
-      data: {
-        userId: user.userId,
-        username: user.username,
-        email: user.email,
-        profileImage: user.profileImage,
-      },
+      data: user,
     });
   } catch {
     res.status(500).json({
@@ -11455,6 +11063,7 @@ export const getMe = async (req: Request, res: Response): Promise<void> => {
     });
   }
 };
+
 export const logout = async (req: Request, res: Response): Promise<void> => {
   res.set("Cache-Control", "no-store");
 
@@ -11466,11 +11075,9 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
           reject(error);
           return;
         }
-
         resolve();
       });
     });
-
     // สั่งให้เบราว์เซอร์ลบ cookie ชื่อเดียวกับใน server.ts
     res.clearCookie("animal-spotting.sid", {
       path: "/",
@@ -11507,7 +11114,6 @@ export const MAX_PROFILE_PHOTO_SIZE = 2 * 1024 * 1024;
 function createProfileUpload(userID: number, fileType: string) {
   const extension = PROFILE_IMAGE_EXTENSIONS[fileType];
   if (!extension) throw new Error("Unsupported profile image type");
-
 
   const bucket = process.env.R2_BUCKET_NAMEProfile;
   const endpoint = process.env.R2_ENDPOINTProfile;
@@ -11560,493 +11166,6 @@ export async function uploadProfilePhoto(userID: number, fileType: string, body:
 }
 </file>
 
-<file path="src/controllers/spotController.ts">
-import type { Request, Response } from "express";
-import { Spot, Photo, Animal, User, SpottedIn } from "../models/index.js";
-import {
-  generatePresignedUrl,
-  deleteFilesFromR2,
-} from "../services/r2ServiceSpots.js";
-import sequelize from "../config/db.js";
-import { Op } from "sequelize";
-
-// api for presignedurl
-export const getPresignedUrl = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const { fileName, fileType } = req.body;
-    if (!fileName || !fileType) {
-      res
-        .status(400)
-        .json({ success: false, message: "Missing fileName or fileType" });
-      return;
-    }
-    //create path for upload
-    const { uploadUrl, publicUrl } = await generatePresignedUrl(
-      fileName,
-      fileType,
-    );
-    res.status(200).json({
-      success: true,
-      data: { uploadUrl, publicUrl },
-    });
-  } catch (error) {
-    console.error("Error generating presigned url:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
-  }
-};
-
-// api create spot
-export const createSpot = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  const { title, description, address, lat, lng, photoUrls, animals, date } =
-    req.body;
-
-  //ตอนที่สร้าง spot มันจะให้ spot บันทึกว่า userID ไหนเป็นคนสร้าง
-  const userId = req.session.userID;
-  if (!userId) {
-    res.status(401).json({
-      success: false,
-      message: "Please log in",
-    });
-    return;
-  }
-  //เปิด transaction
-  const t = await sequelize.transaction();
-
-  try {
-    const newSpot = await Spot.create(
-      {
-        userId: userId,
-        title,
-        description,
-        address,
-        latitude: lat,
-        longitude: lng,
-        date,
-      },
-      { transaction: t },
-    );
-
-    if (photoUrls && Array.isArray(photoUrls) && photoUrls.length > 0) {
-      const photoRecords = photoUrls.map((url: string) => ({
-        spotId: newSpot.spotId,
-        photoUrl: url,
-      }));
-      await Photo.bulkCreate(photoRecords, { transaction: t });
-    }
-
-    if (animals && Array.isArray(animals) && animals.length > 0) {
-      const uniqueAnimalIds = [
-        ...new Set(
-          animals
-            .map((animal: any) =>
-              typeof animal === "object"
-                ? Number(animal.animalId)
-                : Number(animal),
-            )
-            .filter((id: number) => !Number.isNaN(id) && id > 0),
-        ),
-      ];
-
-      if (uniqueAnimalIds.length > 0) {
-        // บันทึกลงตาราง SpottedIn
-        const spottedRecords = uniqueAnimalIds.map((animalId) => ({
-          spotId: newSpot.spotId,
-          animalId: animalId,
-        }));
-        await SpottedIn.bulkCreate(spottedRecords, { transaction: t });
-
-        await Animal.increment("spotsCount", {
-          by: 1,
-          where: {
-            animalId: uniqueAnimalIds,
-          },
-          transaction: t,
-        });
-      }
-    }
-
-    await t.commit();
-
-    const createdSpotWithDetails = await Spot.findByPk(newSpot.spotId, {
-      include: [
-        {
-          model: User,
-          attributes: ["username", "profileImage"],
-          as: "user",
-        },
-      ],
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Spot created successfully",
-      data: createdSpotWithDetails,
-    });
-  } catch (error) {
-    await t.rollback();
-    console.error("Error creating spot:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
-  }
-};
-
-// api getall spots
-export const getAllSpots = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  try {
-    const spots = await Spot.findAll({
-      include: [
-        {
-          model: Photo,
-          as: "photos",
-          attributes: ["photoId", "photoUrl"],
-        },
-        {
-          model: Animal,
-          as: "animals",
-          attributes: ["animalId", "name", "categoryId", "animalImagePin"],
-          through: { attributes: [] },
-        },
-        {
-          model: User,
-          as: "user",
-          attributes: ["userId", "username"],
-        },
-      ],
-      order: [["createdAt", "DESC"]],
-    });
-
-    res.status(200).json({
-      success: true,
-      count: spots.length,
-      data: spots,
-    });
-  } catch (error) {
-    console.error("Error fetching spots:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-    });
-  }
-};
-
-// api update spot
-export const updateSpot = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  const spotId = Number(req.params.spotId);
-  const userId = req.session.userID;
-
-  if (!userId) {
-    res.status(401).json({
-      success: false,
-      message: "Please log in",
-    });
-    return;
-  }
-
-  if (Number.isNaN(spotId) || spotId <= 0) {
-    res.status(400).json({
-      success: false,
-      message: "Invalid spot ID",
-    });
-    return;
-  }
-
-  const { title, description, address, lat, lng, photoUrls, animals, date } =
-    req.body;
-
-  const t = await sequelize.transaction();
-  const removedUrls: string[] = [];
-
-  try {
-    // 1. ค้นหา Spot เดิมและตรวจสอบสิทธิ์ความเป็นเจ้าของ
-    const spot = await Spot.findByPk(spotId, { transaction: t });
-
-    if (!spot) {
-      await t.rollback();
-      res.status(404).json({
-        success: false,
-        message: "Spot not found",
-      });
-      return;
-    }
-
-    if (spot.userId !== userId) {
-      await t.rollback();
-      res.status(403).json({
-        success: false,
-        message: "You do not have permission to edit this spot",
-      });
-      return;
-    }
-
-    // 2. อัปเดตข้อมูลหลักของ Spot
-    await spot.update(
-      {
-        title: title ?? spot.title,
-        description: description ?? spot.description,
-        address: address ?? spot.address,
-        latitude: lat !== undefined ? lat : spot.latitude,
-        longitude: lng !== undefined ? lng : spot.longitude,
-        date: date ?? spot.date,
-      },
-      { transaction: t },
-    );
-
-    // 3. จัดการรูปภาพแบบ Differential (ลบเฉพาะรูปที่หายไป เพิ่มเฉพาะรูปใหม่)
-    if (Array.isArray(photoUrls)) {
-      const validUrls = [
-        ...new Set(
-          photoUrls
-            .filter((url: unknown): url is string => typeof url === "string")
-            .map((url) => url.trim())
-            .filter((url) => url.length > 0),
-        ),
-      ];
-
-      const existingPhotos = await Photo.findAll({
-        where: { spotId },
-        transaction: t,
-      });
-      const existingUrls = existingPhotos.map((p) => p.photoUrl);
-      removedUrls.push(
-        ...existingUrls.filter((url) => !validUrls.includes(url)),
-      );
-      const addedUrls = validUrls.filter((url) => !existingUrls.includes(url));
-
-      if (removedUrls.length > 0) {
-        await Photo.destroy({
-          where: { spotId, photoUrl: removedUrls },
-          transaction: t,
-        });
-      }
-
-      if (addedUrls.length > 0) {
-        await Photo.bulkCreate(
-          addedUrls.map((photoUrl) => ({ spotId, photoUrl })),
-          { transaction: t },
-        );
-      }
-    }
-
-    // 4. จัดการสัตว์แบบ Differential (ลบเฉพาะตัวที่เอาออก เพิ่มเฉพาะตัวที่มาใหม่)
-    if (Array.isArray(animals)) {
-      const newAnimalIds = [
-        ...new Set(
-          animals
-            .map((animal: any) =>
-              typeof animal === "object"
-                ? Number(animal.animalId)
-                : Number(animal),
-            )
-            .filter((id: number) => !Number.isNaN(id) && id > 0),
-        ),
-      ];
-
-      const oldSpottedRecords = await SpottedIn.findAll({
-        where: { spotId },
-        transaction: t,
-      });
-      const oldAnimalIds = oldSpottedRecords.map((r) => r.animalId);
-
-      const removedAnimalIds = oldAnimalIds.filter(
-        (id) => !newAnimalIds.includes(id),
-      );
-      const addedAnimalIds = newAnimalIds.filter(
-        (id) => !oldAnimalIds.includes(id),
-      );
-
-      if (removedAnimalIds.length > 0) {
-        await SpottedIn.destroy({
-          where: { spotId, animalId: removedAnimalIds },
-          transaction: t,
-        });
-
-        await Animal.decrement("spotsCount", {
-          by: 1,
-          where: { animalId: removedAnimalIds, spotsCount: { [Op.gt]: 0 } },
-          transaction: t,
-        });
-      }
-
-      if (addedAnimalIds.length > 0) {
-        await SpottedIn.bulkCreate(
-          addedAnimalIds.map((animalId) => ({ spotId, animalId })),
-          { transaction: t },
-        );
-
-        await Animal.increment("spotsCount", {
-          by: 1,
-          where: { animalId: addedAnimalIds },
-          transaction: t,
-        });
-      }
-    }
-
-    await t.commit();
-
-    if (removedUrls.length > 0) {
-      deleteFilesFromR2(removedUrls).catch((r2Err) => {
-        console.error("Warning: Failed to delete old files from R2:", r2Err);
-      });
-    }
-
-    // 5. ดึงข้อมูลล่าสุดพร้อม include (เหมือน getAllSpots) ส่งกลับไปให้หน้าบ้าน
-    const updatedSpot = await Spot.findByPk(spotId, {
-      include: [
-        {
-          model: Photo,
-          as: "photos",
-          attributes: ["photoId", "photoUrl"],
-        },
-        {
-          model: Animal,
-          as: "animals",
-          attributes: ["animalId", "name", "categoryId", "animalImagePin"],
-          through: { attributes: [] },
-        },
-        {
-          model: User,
-          as: "user",
-          attributes: ["userId", "username"],
-        },
-      ],
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Spot updated successfully",
-      data: updatedSpot,
-    });
-  } catch (error) {
-    await t.rollback();
-    console.error("Error updating spot:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-    });
-  }
-};
-
-// api delete spot
-export const deleteSpot = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  const spotId = Number(req.params.spotId);
-  const userId = req.session.userID;
-
-  if (!userId) {
-    res.status(401).json({
-      success: false,
-      message: "Please log in",
-    });
-    return;
-  }
-
-  if (Number.isNaN(spotId) || spotId <= 0) {
-    res.status(400).json({
-      success: false,
-      message: "Invalid spot ID",
-    });
-    return;
-  }
-
-  const t = await sequelize.transaction();
-  let photoUrlsToDelete: string[] = [];
-
-  try {
-    // 1. ค้นหา Spot และตรวจสอบสิทธิ์ความเป็นเจ้าของ
-    const spot = await Spot.findByPk(spotId, { transaction: t });
-
-    if (!spot) {
-      await t.rollback();
-      res.status(404).json({
-        success: false,
-        message: "Spot not found",
-      });
-      return;
-    }
-
-    if (spot.userId !== userId) {
-      await t.rollback();
-      res.status(403).json({
-        success: false,
-        message: "You do not have permission to delete this spot",
-      });
-      return;
-    }
-
-    // 2. ดึง URL รูปภาพทั้งหมดของ Spot นี้เก็บไว้ (เพื่อเอาไปลบออกจาก R2 หลัง commit)
-    const photos = await Photo.findAll({
-      where: { spotId },
-      transaction: t,
-    });
-    photoUrlsToDelete = photos.map((p) => p.photoUrl);
-
-    // 3. ดึงรายการสัตว์ที่ผูกกับ Spot นี้ เพื่อลด spotsCount ลง 1
-    const spottedRecords = await SpottedIn.findAll({
-      where: { spotId },
-      transaction: t,
-    });
-    const animalIds = spottedRecords.map((r) => r.animalId);
-
-    if (animalIds.length > 0) {
-      await Animal.decrement("spotsCount", {
-        by: 1,
-        where: { animalId: animalIds, spotsCount: { [Op.gt]: 0 } },
-        transaction: t,
-      });
-    }
-
-    // 4. ลบข้อมูลในตารางลูก (Photo, SpottedIn) และลบตัว Spot หลัก
-    await Photo.destroy({
-      where: { spotId },
-      transaction: t,
-    });
-
-    await SpottedIn.destroy({
-      where: { spotId },
-      transaction: t,
-    });
-
-    await spot.destroy({ transaction: t });
-
-    // ยืนยันการลบข้อมูลใน Database
-    await t.commit();
-
-    if (photoUrlsToDelete.length > 0) {
-      deleteFilesFromR2(photoUrlsToDelete).catch((r2Err) => {
-        console.error("Warning: Failed to delete spot photos from R2:", r2Err);
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Spot deleted successfully",
-    });
-  } catch (error) {
-    if (t && !(t as any).finished) {
-      await t.rollback();
-    }
-    console.error("Error deleting spot:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-    });
-  }
-};
-</file>
-
 <file path="src/routes/authRoutes.ts">
 import { Router } from 'express';
 import { getProfilePhotoUploadUrl, updateProfile } from '../controllers/profileController.js';
@@ -12073,10 +11192,11 @@ export default router;
 </file>
 
 <file path="src/server.ts">
+import 'dotenv/config';
+import prisma from './config/db.js';
 import express from 'express';
 import cors from 'cors';
 import session from 'express-session';
-import sequelize from './config/db.js';
 import animalRoutes from './routes/animalRoutes.js';
 import spotRoutes from './routes/spotRoutes.js'
 import authRoutes from './routes/authRoutes.js';
@@ -12141,6 +11261,564 @@ const startServer = async () => {
 startServer();
 </file>
 
+<file path="src/controllers/spotController.ts">
+import type { Request, Response } from "express";
+import prisma from "../config/db.js";
+import {
+  generatePresignedUrl,
+  deleteFilesFromR2,
+} from "../services/r2ServiceSpots.js";
+
+// Helper สำหรับ Throw error ที่มี HTTP status ภายใน Prisma interactive transaction
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// api for presignedurl
+export const getPresignedUrl = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = req.session.userID;
+    if (!userId) {
+      res.status(401).json({ success: false, message: "Please log in" });
+      return;
+    }
+
+    const { fileName, fileType, spotId } = req.body;
+
+    if (!fileName || !fileType) {
+      res
+        .status(400)
+        .json({ success: false, message: "Missing fileName or fileType" });
+      return;
+    }
+
+    if (typeof fileType !== "string" || !fileType.startsWith("image/")) {
+      res
+        .status(400)
+        .json({ success: false, message: "Only image files are allowed" });
+      return;
+    }
+
+    let parsedSpotId: number | undefined = undefined;
+
+    if (spotId !== undefined && spotId !== null && spotId !== "") {
+      parsedSpotId = Number(spotId);
+      if (Number.isNaN(parsedSpotId) || parsedSpotId <= 0) {
+        res.status(400).json({ success: false, message: "Invalid spotId" });
+        return;
+      }
+
+      // เช็กสิทธิ์ว่าเป็นเจ้าของ Spot จริงไหมก่อนออกลิงก์ให้อัปโหลดเข้าโฟลเดอร์นั้น
+      const spot = await prisma.spot.findUnique({
+        where: { spotId: parsedSpotId },
+        select: { userId: true },
+      });
+
+      if (!spot) {
+        res.status(404).json({ success: false, message: "Spot not found" });
+        return;
+      }
+
+      if (spot.userId !== userId) {
+        res.status(403).json({
+          success: false,
+          message: "You do not have permission to upload to this spot",
+        });
+        return;
+      }
+    }
+
+    const { uploadUrl, publicUrl } = await generatePresignedUrl(
+      fileName,
+      fileType,
+      userId,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: { uploadUrl, publicUrl },
+    });
+  } catch (error) {
+    console.error("Error generating presigned url:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+// api create spot
+export const createSpot = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const { title, description, address, lat, lng, photoUrls, animals, date } =
+    req.body;
+
+  const userId = req.session.userID;
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Please log in",
+    });
+    return;
+  }
+
+  try {
+    const newSpot = await prisma.$transaction(async (tx) => {
+      const created = await tx.spot.create({
+        data: {
+          userId,
+          title,
+          description: description ?? null,
+          address,
+          latitude: lat,
+          longitude: lng,
+          date: date ? new Date(date) : null,
+        },
+      });
+
+      // บันทึกรูปภาพลง DB ใน Transaction เดียวกันได้เลย
+      if (Array.isArray(photoUrls) && photoUrls.length > 0) {
+        const validUrls = [
+          ...new Set(
+            photoUrls
+              .filter((url: unknown): url is string => typeof url === "string")
+              .map((url) => url.trim())
+              .filter((url) => url.length > 0),
+          ),
+        ];
+
+        if (validUrls.length > 0) {
+          await tx.photo.createMany({
+            data: validUrls.map((photoUrl) => ({
+              spotId: created.spotId,
+              photoUrl,
+            })),
+          });
+        }
+      }
+
+      if (animals && Array.isArray(animals) && animals.length > 0) {
+        const uniqueAnimalIds = [
+          ...new Set(
+            animals
+              .map((animal: any) =>
+                typeof animal === "object"
+                  ? Number(animal.animalId)
+                  : Number(animal),
+              )
+              .filter((id: number) => !Number.isNaN(id) && id > 0),
+          ),
+        ];
+
+        if (uniqueAnimalIds.length > 0) {
+          await tx.spottedIn.createMany({
+            data: uniqueAnimalIds.map((animalId) => ({
+              spotId: created.spotId,
+              animalId,
+            })),
+          });
+
+          await tx.animal.updateMany({
+            where: { animalId: { in: uniqueAnimalIds } },
+            data: { spotsCount: { increment: 1 } },
+          });
+        }
+      }
+
+      return tx.spot.findUnique({
+        where: { spotId: created.spotId },
+        include: {
+          user: {
+            select: { username: true, profileImage: true },
+          },
+          photos: {
+            select: { photoId: true, photoUrl: true },
+          },
+        },
+      });
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Spot created successfully",
+      data: newSpot,
+    });
+  } catch (error) {
+    console.error("Error creating spot:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+// api getall spots
+export const getAllSpots = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const rawSpots = await prisma.spot.findMany({
+      include: {
+        photos: {
+          select: { photoId: true, photoUrl: true },
+        },
+        spottedIn: {
+          select: {
+            animal: {
+              select: {
+                animalId: true,
+                name: true,
+                categoryId: true,
+                animalImagePin: true,
+              },
+            },
+          },
+        },
+        user: {
+          select: { userId: true, username: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const spots = rawSpots.map(({ spottedIn, ...spot }) => ({
+      ...spot,
+      animals: spottedIn.map((item) => item.animal),
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: spots.length,
+      data: spots,
+    });
+  } catch (error) {
+    console.error("Error fetching spots:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+// api update spot
+export const updateSpot = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const spotId = Number(req.params.spotId);
+  const userId = req.session.userID;
+
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Please log in",
+    });
+    return;
+  }
+
+  if (Number.isNaN(spotId) || spotId <= 0) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid spot ID",
+    });
+    return;
+  }
+
+  const { title, description, address, lat, lng, photoUrls, animals, date } =
+    req.body;
+
+  try {
+    // 1. ค้นหา Spot เดิมและตรวจสอบสิทธิ์ความเป็นเจ้าของก่อนทำอย่างอื่น
+    const spot = await prisma.spot.findUnique({ where: { spotId } });
+
+    if (!spot) {
+      res.status(404).json({ success: false, message: "Spot not found" });
+      return;
+    }
+
+    if (spot.userId !== userId) {
+      res.status(403).json({
+        success: false,
+        message: "You do not have permission to edit this spot",
+      });
+      return;
+    }
+
+    // 2. เตรียมจัดการรูปภาพ
+    let removedUrls: string[] = [];
+    let addedUrls: string[] = [];
+    const hasPhotoUpdates = Array.isArray(photoUrls);
+
+    if (hasPhotoUpdates) {
+      const validUrls = [
+        ...new Set(
+          photoUrls
+            .filter((url: unknown): url is string => typeof url === "string")
+            .map((url) => url.trim())
+            .filter((url) => url.length > 0),
+        ),
+      ];
+
+      const existingPhotos = await prisma.photo.findMany({
+        where: { spotId },
+      });
+
+      const existingUrls = existingPhotos.map((p) => p.photoUrl);
+
+      removedUrls = existingUrls.filter((url) => !validUrls.includes(url));
+      addedUrls = validUrls.filter((url) => !existingUrls.includes(url));
+    }
+
+    // 3. เปิด Transaction อัปเดตข้อมูลทั้งหมดลง Database (ทำงานเร็วมาก ไม่มีคำสั่งเน็ตขวาง)
+    const rawUpdatedSpot = await prisma.$transaction(async (tx) => {
+      // 3.1 อัปเดตข้อมูลหลักของ Spot
+      await tx.spot.update({
+        where: { spotId },
+        data: {
+          title: title ?? spot.title,
+          description:
+            description !== undefined ? description : spot.description,
+          address: address ?? spot.address,
+          latitude: lat !== undefined ? lat : spot.latitude,
+          longitude: lng !== undefined ? lng : spot.longitude,
+          date: date !== undefined ? (date ? new Date(date) : null) : spot.date,
+        },
+      });
+
+      // 3.2 อัปเดตตาราง Photo
+      if (hasPhotoUpdates) {
+        if (removedUrls.length > 0) {
+          await tx.photo.deleteMany({
+            where: { spotId, photoUrl: { in: removedUrls } },
+          });
+        }
+
+        if (addedUrls.length > 0) {
+          await tx.photo.createMany({
+            data: addedUrls.map((photoUrl) => ({ spotId, photoUrl })),
+          });
+        }
+      }
+
+      // 3.3 จัดการสัตว์แบบ Differential
+      if (Array.isArray(animals)) {
+        const newAnimalIds = [
+          ...new Set(
+            animals
+              .map((animal: any) =>
+                typeof animal === "object"
+                  ? Number(animal.animalId)
+                  : Number(animal),
+              )
+              .filter((id: number) => !Number.isNaN(id) && id > 0),
+          ),
+        ];
+
+        const oldSpottedRecords = await tx.spottedIn.findMany({
+          where: { spotId },
+        });
+        const oldAnimalIds = oldSpottedRecords.map((r) => r.animalId);
+
+        const removedAnimalIds = oldAnimalIds.filter(
+          (id) => !newAnimalIds.includes(id),
+        );
+        const addedAnimalIds = newAnimalIds.filter(
+          (id) => !oldAnimalIds.includes(id),
+        );
+
+        if (removedAnimalIds.length > 0) {
+          await tx.spottedIn.deleteMany({
+            where: { spotId, animalId: { in: removedAnimalIds } },
+          });
+
+          await tx.animal.updateMany({
+            where: {
+              animalId: { in: removedAnimalIds },
+              spotsCount: { gt: 0 },
+            },
+            data: { spotsCount: { decrement: 1 } },
+          });
+        }
+
+        if (addedAnimalIds.length > 0) {
+          await tx.spottedIn.createMany({
+            data: addedAnimalIds.map((animalId) => ({ spotId, animalId })),
+          });
+
+          await tx.animal.updateMany({
+            where: { animalId: { in: addedAnimalIds } },
+            data: { spotsCount: { increment: 1 } },
+          });
+        }
+      }
+
+      // 3.4 ดึงข้อมูลล่าสุดพร้อม include ส่งกลับไปให้หน้าบ้าน
+      return tx.spot.findUnique({
+        where: { spotId },
+        include: {
+          photos: {
+            select: { photoId: true, photoUrl: true },
+          },
+          spottedIn: {
+            select: {
+              animal: {
+                select: {
+                  animalId: true,
+                  name: true,
+                  categoryId: true,
+                  animalImagePin: true,
+                },
+              },
+            },
+          },
+          user: {
+            select: { userId: true, username: true },
+          },
+        },
+      });
+    });
+
+    // 4. ลบรูปเก่าที่ไม่ได้ใช้ออกจาก R2 แบบ Background
+    if (removedUrls.length > 0) {
+      deleteFilesFromR2(removedUrls).catch((r2Err) => {
+        console.error("Warning: Failed to delete old files from R2:", r2Err);
+      });
+    }
+
+    const updatedSpot = rawUpdatedSpot
+      ? (() => {
+          const { spottedIn, ...rest } = rawUpdatedSpot;
+          return {
+            ...rest,
+            animals: spottedIn.map((item) => item.animal),
+          };
+        })()
+      : null;
+
+    res.status(200).json({
+      success: true,
+      message: "Spot updated successfully",
+      data: updatedSpot,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      res.status(error.status).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    console.error("Error updating spot:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+// api delete spot
+export const deleteSpot = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const spotId = Number(req.params.spotId);
+  const userId = req.session.userID;
+
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Please log in",
+    });
+    return;
+  }
+
+  if (Number.isNaN(spotId) || spotId <= 0) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid spot ID",
+    });
+    return;
+  }
+
+  try {
+    const photoUrlsToDelete = await prisma.$transaction(async (tx) => {
+      // 1. ค้นหา Spot และตรวจสอบสิทธิ์ความเป็นเจ้าของ
+      const spot = await tx.spot.findUnique({ where: { spotId } });
+
+      if (!spot) {
+        throw new HttpError(404, "Spot not found");
+      }
+
+      if (spot.userId !== userId) {
+        throw new HttpError(
+          403,
+          "You do not have permission to delete this spot",
+        );
+      }
+
+      // 2. ดึง URL รูปภาพทั้งหมดของ Spot นี้เก็บไว้ (เพื่อเอาไปลบออกจาก R2 หลัง commit)
+      const photos = await tx.photo.findMany({
+        where: { spotId },
+        select: { photoUrl: true },
+      });
+      const urls = photos.map((p) => p.photoUrl);
+
+      // 3. ดึงรายการสัตว์ที่ผูกกับ Spot นี้ เพื่อลด spotsCount ลง 1
+      const spottedRecords = await tx.spottedIn.findMany({
+        where: { spotId },
+        select: { animalId: true },
+      });
+      const animalIds = spottedRecords.map((r) => r.animalId);
+
+      if (animalIds.length > 0) {
+        await tx.animal.updateMany({
+          where: {
+            animalId: { in: animalIds },
+            spotsCount: { gt: 0 },
+          },
+          data: { spotsCount: { decrement: 1 } },
+        });
+      }
+
+      // 4. ลบข้อมูลในตารางลูก และลบตัว Spot หลัก
+      await tx.photo.deleteMany({ where: { spotId } });
+      await tx.spottedIn.deleteMany({ where: { spotId } });
+      await tx.spot.delete({ where: { spotId } });
+
+      return urls;
+    });
+
+    if (photoUrlsToDelete.length > 0) {
+      deleteFilesFromR2(photoUrlsToDelete).catch((r2Err) => {
+        console.error("Warning: Failed to delete spot photos from R2:", r2Err);
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Spot deleted successfully",
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      res.status(error.status).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    console.error("Error deleting spot:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+</file>
+
 <file path="package.json">
 {
   "name": "animal_spotting_db",
@@ -12149,7 +11827,7 @@ startServer();
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "tsx watch src/server.ts",
+    "start": "tsx watch src/server.ts"
   },
   "keywords": [],
   "author": "",
@@ -12165,6 +11843,7 @@ startServer();
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
     "express-session": "^1.19.0",
+    "mariadb": "^3.5.5",
     "multer": "^2.5.0",
     "mysql2": "^3.24.6"
   },

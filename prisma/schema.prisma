@@ -1,3 +1,6 @@
+// npx prisma migrate dev --name ชื่อที่แก้ อัปเดตตารางจริงใน MySQL
+// npx prisma generate อัปเดตโค้ดใน src/generated/prisma
+
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"

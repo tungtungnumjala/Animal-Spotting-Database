@@ -4,7 +4,18 @@ import {
   DeleteObjectsCommand,
   CopyObjectCommand,
 } from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+export const SPOT_IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+};
+
+// กำหนดขนาดสูงสุดต่อรูปไม่เกิน 5 MB
+export const MAX_SPOT_PHOTO_SIZE = 5 * 1024 * 1024;
+export const MAX_SPOT_PHOTOS_COUNT = 20;
 
 // ตั้งค่าเชื่อม cloudfare
 const s3Client = new S3Client({
@@ -17,17 +28,25 @@ const s3Client = new S3Client({
 });
 
 export const generatePresignedUrl = async (
-  fileName: string,
   fileType: string,
   userId: number,
 ) => {
-  const folder = `spots/${userId}`;
-    // ทำความสะอาดชื่อไฟล์: แทนที่ช่องว่างด้วยขีดล่าง และตัดอักขระพิเศษเพื่อป้องกัน URL พัง
-  const sanitizedFileName = fileName
-    .trim()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-zA-Z0-9._-]/g, "");
-  const uniqueFileName = `spots/${Date.now()}-${sanitizedFileName || "photo.jpg"}`;
+  const extension = SPOT_IMAGE_EXTENSIONS[fileType];
+  if (!extension) {
+    throw new Error("Unsupported image type");
+  }
+
+  const publicBaseUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "");
+  if (!publicBaseUrl) {
+    throw new Error("R2_PUBLIC_URL is not configured");
+  }
+
+  const uniqueFileName = `spots/${userId}/${randomUUID()}.${extension}`;
+  const publicUrl = `${publicBaseUrl}/${uniqueFileName}`;
+
+  if (publicUrl.length > 255) {
+    throw new Error("Generated public URL exceeds 255 characters");
+  }
 
   // สร้าง command หาที่ลงผ่าน uniqueFileName ที่เเบ่ง directory ตาม / เตรียมส่ง uploadUrl ไปให้ frontend ว่ารูปนั้นจะลงที่ไหน
   const command = new PutObjectCommand({
@@ -41,8 +60,27 @@ export const generatePresignedUrl = async (
   return {
     uploadUrl,
     // ตัว url ที่โยงไปหารูปที่ลงไปใน uploadUrl ก่อนหน้า
-    publicUrl: `${process.env.R2_PUBLIC_URL?.replace(/\/+$/, "")}/${uniqueFileName}`,
+    publicUrl,
   };
+};
+
+// ตรวจสอบว่า URL ที่ส่งมาบันทึกลง DB เป็น URL ของ R2 จริง, อยู่ในโฟลเดอร์ spots/ และยาวไม่เกิน 255 ตัวอักษร
+export const isValidSpotPhotoUrl = (url: string, userId: number): boolean => {
+  if (url.length === 0 || url.length > 255) return false;
+
+  const baseUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "");
+  if (!baseUrl) return false;
+
+  try {
+    const parsedUrl = new URL(url);
+    const parsedBase = new URL(baseUrl);
+
+    if (parsedUrl.origin !== parsedBase.origin) return false;
+
+    return parsedUrl.pathname.startsWith(`/spots/${userId}/`);
+  } catch {
+    return false;
+  }
 };
 
 // ฟังก์ชันสำหรับลบไฟล์บน R2

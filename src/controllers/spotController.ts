@@ -3,6 +3,10 @@ import prisma from "../config/db.js";
 import {
   generatePresignedUrl,
   deleteFilesFromR2,
+  isValidSpotPhotoUrl,
+  SPOT_IMAGE_EXTENSIONS,
+  MAX_SPOT_PHOTO_SIZE,
+  MAX_SPOT_PHOTOS_COUNT,
 } from "../services/r2ServiceSpots.js";
 
 // Helper สำหรับ Throw error ที่มี HTTP status ภายใน Prisma interactive transaction
@@ -12,6 +16,51 @@ class HttpError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+// Helper ตรวจสอบพิกัด Latitude / Longitude
+function parseCoordinate(
+  value: unknown,
+  min: number,
+  max: number,
+): number | null {
+  const num =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(num) || num < min || num > max) return null;
+  return num;
+}
+
+// Helper ตรวจสอบและกรองรายการ photoUrls
+function validatePhotoUrls(
+  photoUrls: unknown,
+  userId: number,
+): { ok: true; urls: string[] } | { ok: false; message: string } {
+  if (!Array.isArray(photoUrls)) {
+    return { ok: false, message: "photoUrls must be an array" };
+  }
+  if (photoUrls.length > MAX_SPOT_PHOTOS_COUNT) {
+    return {
+      ok: false,
+      message: `You can upload up to ${MAX_SPOT_PHOTOS_COUNT} photos per spot`,
+    };
+  }
+
+  const cleaned: string[] = [];
+  for (const item of photoUrls) {
+    if (typeof item !== "string") {
+      return { ok: false, message: "Invalid photo URL format" };
+    }
+    const trimmedUrl = item.trim();
+    if (!isValidSpotPhotoUrl(trimmedUrl, userId)) {
+      return { ok: false, message: "Invalid or unauthorized photo URL" };
+    }
+    cleaned.push(trimmedUrl);
+  }
+  return { ok: true, urls: [...new Set(cleaned)] };
 }
 
 // api for presignedurl
@@ -26,24 +75,33 @@ export const getPresignedUrl = async (
       return;
     }
 
-    const { fileName, fileType, spotId } = req.body;
+    const { fileType, fileSize, spotId } = req.body ?? {};
 
-    if (!fileName || !fileType) {
-      res
-        .status(400)
-        .json({ success: false, message: "Missing fileName or fileType" });
+    if (
+      typeof fileType !== "string" ||
+      !Object.hasOwn(SPOT_IMAGE_EXTENSIONS, fileType)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Only PNG, JPEG, or WebP images are allowed",
+      });
       return;
     }
 
-    if (typeof fileType !== "string" || !fileType.startsWith("image/")) {
-      res
-        .status(400)
-        .json({ success: false, message: "Only image files are allowed" });
+    if (
+      typeof fileSize !== "number" ||
+      !Number.isInteger(fileSize) ||
+      fileSize <= 0 ||
+      fileSize > MAX_SPOT_PHOTO_SIZE
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Image size must be between 1 byte and 5 MB",
+      });
       return;
     }
 
     let parsedSpotId: number | undefined = undefined;
-
     if (spotId !== undefined && spotId !== null && spotId !== "") {
       parsedSpotId = Number(spotId);
       if (Number.isNaN(parsedSpotId) || parsedSpotId <= 0) {
@@ -72,7 +130,6 @@ export const getPresignedUrl = async (
     }
 
     const { uploadUrl, publicUrl } = await generatePresignedUrl(
-      fileName,
       fileType,
       userId,
     );
@@ -104,39 +161,113 @@ export const createSpot = async (
     return;
   }
 
+  // ตรวจสอบ title (VarChar(100))
+  if (
+    typeof title !== "string" ||
+    title.trim().length < 1 ||
+    title.trim().length > 100
+  ) {
+    res.status(400).json({
+      success: false,
+      message: "Title is required and must be 1–100 characters",
+    });
+    return;
+  }
+  const cleanTitle = title.trim();
+
+  // ตรวจสอบ address
+  if (
+    typeof address !== "string" ||
+    address.trim().length < 1 ||
+    address.trim().length > 1000
+  ) {
+    res.status(400).json({
+      success: false,
+      message: "Address is required and must be 1–1000 characters",
+    });
+    return;
+  }
+  const cleanAddress = address.trim();
+
+  let cleanDate: Date | null = null;
+  if (date !== undefined && date !== null && date !== "") {
+    if (typeof date !== "string" && !(date instanceof Date)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid date format",
+      });
+      return;
+    }
+
+    const parsedDate = new Date(date);
+    // เเปลง date เป็น Timestamp เช็คว่า date มาถูกมั้ย
+    if (Number.isNaN(parsedDate.getTime())) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid date format",
+      });
+      return;
+    }
+    cleanDate = parsedDate;
+  }
+
+  // ตรวจสอบ description (Optional)
+  let cleanDescription: string | null = null;
+  if (description !== undefined && description !== null) {
+    if (typeof description !== "string" || description.length > 5000) {
+      res.status(400).json({
+        success: false,
+        message: "Description must be text up to 5000 characters",
+      });
+      return;
+    }
+    cleanDescription = description.trim() || null;
+  }
+
+  // ตรวจสอบพิกัด lat (-90..90) และ lng (-180..180)
+  const cleanLat = parseCoordinate(lat, -90, 90);
+  const cleanLng = parseCoordinate(lng, -180, 180);
+  if (cleanLat === null || cleanLng === null) {
+    res.status(400).json({
+      success: false,
+      message:
+        "Valid latitude (-90 to 90) and longitude (-180 to 180) are required",
+    });
+    return;
+  }
+
+  // ตรวจสอบ photoUrls
+  let validUrls: string[] = [];
+  if (photoUrls !== undefined && photoUrls !== null) {
+    const photoCheck = validatePhotoUrls(photoUrls, userId);
+    if (!photoCheck.ok) {
+      res.status(400).json({ success: false, message: photoCheck.message });
+      return;
+    }
+    validUrls = photoCheck.urls;
+  }
+
   try {
     const newSpot = await prisma.$transaction(async (tx) => {
       const created = await tx.spot.create({
         data: {
           userId,
-          title,
-          description: description ?? null,
-          address,
-          latitude: lat,
-          longitude: lng,
-          date: date ? new Date(date) : null,
+          title: cleanTitle,
+          description: cleanDescription ?? null,
+          address: cleanAddress,
+          latitude: cleanLat,
+          longitude: cleanLng,
+          date: cleanDate,
         },
       });
 
-      // บันทึกรูปภาพลง DB ใน Transaction เดียวกันได้เลย
-      if (Array.isArray(photoUrls) && photoUrls.length > 0) {
-        const validUrls = [
-          ...new Set(
-            photoUrls
-              .filter((url: unknown): url is string => typeof url === "string")
-              .map((url) => url.trim())
-              .filter((url) => url.length > 0),
-          ),
-        ];
-
-        if (validUrls.length > 0) {
-          await tx.photo.createMany({
-            data: validUrls.map((photoUrl) => ({
-              spotId: created.spotId,
-              photoUrl,
-            })),
-          });
-        }
+      if (validUrls.length > 0) {
+        await tx.photo.createMany({
+          data: validUrls.map((photoUrl) => ({
+            spotId: created.spotId,
+            photoUrl,
+          })),
+        });
       }
 
       if (animals && Array.isArray(animals) && animals.length > 0) {
@@ -144,9 +275,9 @@ export const createSpot = async (
           ...new Set(
             animals
               .map((animal: any) =>
-                typeof animal === "object"
+                typeof animal === "object" && animal !== null
                   ? Number(animal.animalId)
-                  : Number(animal),
+                  : NaN,
               )
               .filter((id: number) => !Number.isNaN(id) && id > 0),
           ),
@@ -264,8 +395,82 @@ export const updateSpot = async (
     return;
   }
 
-  const { title, description, address, lat, lng, photoUrls, animals, date } =
-    req.body;
+  const { title, description, address, photoUrls, animals, date } = req.body;
+
+  // 1. Validate ฟิลด์ที่ถูกส่งเข้ามาแก้ไข (เช็กเฉพาะตัวที่ !== undefined)
+  let cleanTitle: string | undefined;
+  if (title !== undefined) {
+    if (
+      typeof title !== "string" ||
+      title.trim().length < 1 ||
+      title.trim().length > 100
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Title must be 1–100 characters",
+      });
+      return;
+    }
+    cleanTitle = title.trim();
+  }
+
+  let cleanAddress: string | undefined;
+  if (address !== undefined) {
+    if (
+      typeof address !== "string" ||
+      address.trim().length < 1 ||
+      address.trim().length > 1000
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Address must be 1–1000 characters",
+      });
+      return;
+    }
+    cleanAddress = address.trim();
+  }
+
+  let cleanDescription: string | null | undefined;
+  if (description !== undefined) {
+    if (description === null) {
+      cleanDescription = null;
+    } else if (typeof description !== "string" || description.length > 5000) {
+      res.status(400).json({
+        success: false,
+        message: "Description must be text up to 5000 characters",
+      });
+      return;
+    } else {
+      cleanDescription = description.trim() || null;
+    }
+  }
+
+  let cleanDate: Date | null | undefined;
+  if (date !== undefined) {
+    if (date === null || date === "") {
+      cleanDate = null;
+    } else {
+      const parsedDate = new Date(date);
+      if (Number.isNaN(parsedDate.getTime())) {
+        res
+          .status(400)
+          .json({ success: false, message: "Invalid date format" });
+        return;
+      }
+      cleanDate = parsedDate;
+    }
+  }
+
+  // ใช้ validatePhotoUrls ตัวเดียวกับ createSpot
+  let validatedPhotoUrls: string[] | undefined;
+  if (photoUrls !== undefined) {
+    const photoCheck = validatePhotoUrls(photoUrls, userId);
+    if (!photoCheck.ok) {
+      res.status(400).json({ success: false, message: photoCheck.message });
+      return;
+    }
+    validatedPhotoUrls = photoCheck.urls;
+  }
 
   try {
     // 1. ค้นหา Spot เดิมและตรวจสอบสิทธิ์ความเป็นเจ้าของก่อนทำอย่างอื่น
@@ -287,26 +492,19 @@ export const updateSpot = async (
     // 2. เตรียมจัดการรูปภาพ
     let removedUrls: string[] = [];
     let addedUrls: string[] = [];
-    const hasPhotoUpdates = Array.isArray(photoUrls);
 
-    if (hasPhotoUpdates) {
-      const validUrls = [
-        ...new Set(
-          photoUrls
-            .filter((url: unknown): url is string => typeof url === "string")
-            .map((url) => url.trim())
-            .filter((url) => url.length > 0),
-        ),
-      ];
-
+    if (validatedPhotoUrls !== undefined) {
       const existingPhotos = await prisma.photo.findMany({
         where: { spotId },
       });
-
       const existingUrls = existingPhotos.map((p) => p.photoUrl);
 
-      removedUrls = existingUrls.filter((url) => !validUrls.includes(url));
-      addedUrls = validUrls.filter((url) => !existingUrls.includes(url));
+      removedUrls = existingUrls.filter(
+        (url) => !validatedPhotoUrls!.includes(url),
+      );
+      addedUrls = validatedPhotoUrls.filter(
+        (url) => !existingUrls.includes(url),
+      );
     }
 
     // 3. เปิด Transaction อัปเดตข้อมูลทั้งหมดลง Database
@@ -315,18 +513,18 @@ export const updateSpot = async (
       await tx.spot.update({
         where: { spotId },
         data: {
-          title: title ?? spot.title,
+          title: cleanTitle ?? spot.title,
           description:
-            description !== undefined ? description : spot.description,
-          address: address ?? spot.address,
-          latitude: lat !== undefined ? lat : spot.latitude,
-          longitude: lng !== undefined ? lng : spot.longitude,
-          date: date !== undefined ? (date ? new Date(date) : null) : spot.date,
+            cleanDescription !== undefined
+              ? cleanDescription
+              : spot.description,
+          address: cleanAddress ?? spot.address,
+          date: cleanDate !== undefined ? cleanDate : spot.date,
         },
       });
 
       // 3.2 อัปเดตตาราง Photo
-      if (hasPhotoUpdates) {
+      if (validatedPhotoUrls !== undefined) {
         if (removedUrls.length > 0) {
           await tx.photo.deleteMany({
             where: { spotId, photoUrl: { in: removedUrls } },
@@ -346,9 +544,9 @@ export const updateSpot = async (
           ...new Set(
             animals
               .map((animal: any) =>
-                typeof animal === "object"
+                typeof animal === "object" && animal !== null
                   ? Number(animal.animalId)
-                  : Number(animal),
+                  : NaN,
               )
               .filter((id: number) => !Number.isNaN(id) && id > 0),
           ),

@@ -1,0 +1,2010 @@
+This file is a merged representation of a subset of the codebase, containing specifically included files, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Only files matching these patterns are included: src/**, prisma/**, package.json
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+prisma/
+  schema.prisma
+src/
+  config/
+    db.ts
+  controllers/
+    animalController.ts
+    authController.ts
+    collectionController.ts
+    passwordController.ts
+    profileController.ts
+    spotController.ts
+  middleware/
+    registerPhotoUpload.ts
+  routes/
+    animalRoutes.ts
+    authRoutes.ts
+    collectionRoutes.ts
+    spotRoutes.ts
+  services/
+    profileR2Service.ts
+    r2ServiceSpots.ts
+  types/
+    express-session.d.ts
+  utils/
+    password.ts
+  server.ts
+package.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="prisma/schema.prisma">
+// npx prisma migrate dev --name ชื่อที่แก้ อัปเดตตารางจริงใน MySQL
+// npx prisma generate อัปเดตโค้ดใน src/generated/prisma
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model User {
+  userId       Int       @id @default(autoincrement()) @map("user_id")
+  username     String    @db.VarChar(50)
+  email        String    @unique @db.VarChar(100)
+  password     String    @db.VarChar(255)
+  profileImage String?   @map("profile_image") @db.VarChar(255)
+  createdAt    DateTime? @default(now()) @map("created_at")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+
+  spots        Spot[]
+
+  @@map("user")
+}
+
+model Category {
+  categoryId Int      @id @default(autoincrement()) @map("category_id")
+  name       String   @map("category_name") @db.VarChar(50)
+
+  animals    Animal[]
+
+  @@map("category")
+}
+
+model Animal {
+  animalId       Int         @id @default(autoincrement()) @map("animal_id")
+  categoryId     Int         @map("category_id")
+  name           String      @db.VarChar(50)
+  animalImagePin String      @map("animal_image_pin") @db.VarChar(255)
+  spotsCount     Int         @default(0) @map("spots_count")
+  createdAt      DateTime?   @default(now()) @map("created_at")
+  updatedAt      DateTime?   @updatedAt @map("updated_at")
+
+  category       Category    @relation(fields: [categoryId], references: [categoryId])
+  spottedIn      SpottedIn[]
+
+  @@map("animal")
+}
+
+model Spot {
+  spotId      Int         @id @default(autoincrement()) @map("spot_id")
+  userId      Int         @map("user_id")
+  title       String      @db.VarChar(100)
+  description String?     @db.Text
+  address     String      @db.Text
+  latitude    Decimal     @db.Decimal(10, 8)
+  longitude   Decimal     @db.Decimal(11, 8)
+  date        DateTime?   @db.Date
+  createdAt   DateTime?   @default(now()) @map("created_at")
+  updatedAt   DateTime?   @updatedAt @map("updated_at")
+
+  user        User        @relation(fields: [userId], references: [userId])
+  photos      Photo[]
+  spottedIn   SpottedIn[]
+
+  @@map("spot")
+}
+
+model Photo {
+  photoId   Int       @id @default(autoincrement()) @map("photo_id")
+  spotId    Int       @map("spot_id")
+  photoUrl  String    @map("photo_url") @db.VarChar(255)
+  createdAt DateTime? @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+
+  spot      Spot      @relation(fields: [spotId], references: [spotId], onDelete: Cascade)
+
+  @@map("photo")
+}
+
+model SpottedIn {
+  spotId   Int    @map("spot_id")
+  animalId Int    @map("animal_id")
+
+  spot     Spot   @relation(fields: [spotId], references: [spotId], onDelete: Cascade)
+  animal   Animal @relation(fields: [animalId], references: [animalId], onDelete: Cascade)
+
+  @@id([spotId, animalId])
+  @@map("spotted_in")
+}
+</file>
+
+<file path="src/routes/animalRoutes.ts">
+import { Router } from 'express';
+import { getAllAnimals } from '../controllers/animalController.js';
+
+const router = Router();
+
+router.get('/', getAllAnimals);
+
+export default router;
+</file>
+
+<file path="src/types/express-session.d.ts">
+import 'express-session';
+
+declare module 'express-session' {
+    interface SessionData {
+        userID?: number;
+    }
+}
+</file>
+
+<file path="src/utils/password.ts">
+import * as argon2 from 'argon2';
+
+export async function hashPassWord(password: string): Promise<string> {
+    return argon2.hash(password, {
+        type: argon2.argon2id,
+        memoryCost: 19456,
+        timeCost: 2,
+        parallelism: 1,
+    });
+}
+
+export async function verifyPassword(
+    hashedPassword: string,
+    password: string,
+): Promise<boolean> {
+    return argon2.verify(hashedPassword, password);
+}
+</file>
+
+<file path="src/config/db.ts">
+import { PrismaClient } from '../generated/prisma/client.js';
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+
+const adapter = new PrismaMariaDb(process.env.DATABASE_URL!);
+const prisma = new PrismaClient({ adapter });
+
+export default prisma;
+</file>
+
+<file path="src/controllers/passwordController.ts">
+import type { Request, Response } from "express";
+import prisma from "../config/db.js";
+import { hashPassWord, verifyPassword } from "../utils/password.js";
+
+export const changePassword = async (req: Request, res: Response): Promise<void> => {
+  res.set("Cache-Control", "no-store");
+  const userId = req.session.userID;
+  if (!userId) {
+    res.status(401).json({ success: false, message: "Please log in" });
+    return;
+  }
+
+  const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
+  if (typeof currentPassword !== "string" || [...currentPassword].length < 1 || [...currentPassword].length > 128) {
+    res.status(400).json({ success: false, field: "currentPassword", message: "Enter your current password (1–128 characters)." });
+    return;
+  }
+  if (typeof newPassword !== "string" || [...newPassword].length < 10 || [...newPassword].length > 128) {
+    res.status(400).json({ success: false, field: "newPassword", message: "New password must be 10–128 characters." });
+    return;
+  }
+  if (typeof confirmPassword !== "string" || confirmPassword !== newPassword) {
+    res.status(400).json({ success: false, field: "confirmPassword", message: "Passwords do not match." });
+    return;
+  }
+  if (newPassword === currentPassword) {
+    res.status(400).json({ success: false, field: "newPassword", message: "Choose a password different from your current password." });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true, password: true },
+    });
+    if (!user) {
+      res.status(401).json({ success: false, message: "Please log in" });
+      return;
+    }
+    if (!await verifyPassword(user.password, currentPassword)) {
+      res.status(400).json({ success: false, field: "currentPassword", message: "Current password is incorrect." });
+      return;
+    }
+
+    const password = await hashPassWord(newPassword);
+    // ใช้ updateMany เพื่อเช็กเงื่อนไข password เดิมป้องกัน race condition แบบเดียวกับ Sequelize
+    const result = await prisma.user.updateMany({
+      where: { userId, password: user.password },
+      data: { password },
+    });
+
+    if (result.count !== 1) {
+      res.status(409).json({ success: false, field: "currentPassword", message: "Your password has changed. Please enter your current password and try again." });
+      return;
+    }
+
+    res.status(200).json({ success: true, message: "Password changed successfully." });
+  } catch {
+    res.status(500).json({ success: false, message: "Unable to change password. Please try again." });
+  }
+};
+</file>
+
+<file path="src/middleware/registerPhotoUpload.ts">
+import type { RequestHandler } from "express";
+import multer from "multer";
+import {
+  MAX_PROFILE_PHOTO_SIZE,
+  PROFILE_IMAGE_EXTENSIONS,
+} from "../services/profileR2Service.js";
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_PROFILE_PHOTO_SIZE, files: 1, fields: 3, parts: 4, fieldSize: 1024 },
+  fileFilter: (_req, file, callback) => {
+    if (!Object.hasOwn(PROFILE_IMAGE_EXTENSIONS, file.mimetype)) {
+      callback(new Error("Choose a PNG, JPEG or WebP photo under 2 MB."));
+      return;
+    }
+    callback(null, true);
+  },
+}).single("profileImage");
+
+function matchesImageType(file: Express.Multer.File): boolean {
+  const bytes = file.buffer;
+  if (file.mimetype === "image/png") {
+    return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  }
+  if (file.mimetype === "image/jpeg") {
+    return bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  }
+  return file.mimetype === "image/webp" && bytes.length >= 12 &&
+    bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
+}
+
+export const registerPhotoUpload: RequestHandler = (req, res, next) => {
+  // คำขอ JSON ที่ไม่มีรูปยังใช้ Register แบบเดิมได้
+  upload(req, res, (error: unknown) => {
+    if (error) {
+      const tooLarge = error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE";
+      res.status(tooLarge ? 413 : 400).json({
+        success: false,
+        message: tooLarge ? "Choose a profile photo under 2 MB." : "Invalid registration form or profile photo.",
+      });
+      return;
+    }
+
+    if (req.file && !matchesImageType(req.file)) {
+      res.status(400).json({ success: false, message: "The profile photo must be a PNG, JPEG or WebP image." });
+      return;
+    }
+    next();
+  });
+};
+</file>
+
+<file path="src/routes/collectionRoutes.ts">
+import { Router } from "express";
+import { getMySpots } from "../controllers/collectionController.js";
+
+const router = Router();
+
+router.get("/", getMySpots);
+
+export default router;
+</file>
+
+<file path="src/routes/spotRoutes.ts">
+import { Router } from 'express';
+import { getPresignedUrl, createSpot, getAllSpots, updateSpot, deleteSpot } from '../controllers/spotController.js';
+
+const router = Router();
+
+router.post('/presigned-url', getPresignedUrl);
+router.post('/', createSpot);
+
+router.get('/', getAllSpots);
+
+router.put('/:spotId', updateSpot);
+
+router.delete('/:spotId', deleteSpot);
+export default router;
+</file>
+
+<file path="src/controllers/animalController.ts">
+import type { Request, Response } from 'express';
+import prisma from '../config/db.js';
+
+export const getAllAnimals = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const animals = await prisma.animal.findMany({
+      orderBy: { spotsCount: 'desc' },
+    });
+    res.status(200).json({
+      success: true,
+      message: 'Successfully fetched animals',
+      data: animals,
+    });
+  } catch (error) {
+    console.error('Error fetching animals:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal Server Error',
+    });
+  }
+};
+</file>
+
+<file path="src/controllers/collectionController.ts">
+import type { Request, Response } from "express";
+import prisma from "../config/db.js";
+
+export const getMySpots = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const userId = req.session.userID;
+
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Please log in",
+    });
+    return;
+  }
+
+  try {
+    const rawSpots = await prisma.spot.findMany({
+      where: { userId },
+      include: {
+        photos: {
+          select: { photoId: true, photoUrl: true },
+        },
+        spottedIn: {
+          select: {
+            animal: {
+              select: {
+                animalId: true,
+                categoryId: true,
+                name: true,
+                animalImagePin: true,
+                spotsCount: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const spots = rawSpots.map(({ spottedIn, ...spot }) => ({
+      ...spot,
+      animals: spottedIn.map((item) => item.animal),
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: spots.length,
+      data: spots,
+    });
+  } catch (error) {
+    console.error("Error fetching collection:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to fetch collection",
+    });
+  }
+};
+</file>
+
+<file path="src/controllers/profileController.ts">
+import type { Request, Response } from "express";
+import { Prisma } from "../generated/prisma/client.js";
+import prisma from "../config/db.js";
+import {
+  generateProfilePresignedUrl,
+  MAX_PROFILE_PHOTO_SIZE,
+  PROFILE_IMAGE_EXTENSIONS,
+} from "../services/profileR2Service.js";
+
+export const getProfilePhotoUploadUrl = async (req: Request, res: Response): Promise<void> => {
+  res.set("Cache-Control", "no-store");
+  const userId = req.session.userID;
+  if (!userId) {
+    res.status(401).json({ success: false, message: "Please log in" });
+    return;
+  }
+
+  const { fileType, fileSize } = req.body ?? {};
+  if (
+    typeof fileType !== "string" ||
+    !Object.hasOwn(PROFILE_IMAGE_EXTENSIONS, fileType) ||
+    typeof fileSize !== "number" ||
+    !Number.isInteger(fileSize) ||
+    fileSize <= 0 ||
+    fileSize > MAX_PROFILE_PHOTO_SIZE
+  ) {
+    res.status(400).json({
+      success: false,
+      message: "Choose a PNG, JPEG or WebP photo under 2 MB.",
+    });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true },
+    });
+    if (!user) {
+      res.status(401).json({ success: false, message: "Please log in" });
+      return;
+    }
+
+    const data = await generateProfilePresignedUrl(userId, fileType);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error("Profile photo upload:", error instanceof Error ? error.message : "Unknown error");
+    res.status(500).json({
+      success: false,
+      message: "Unable to prepare photo upload. Please try again.",
+    });
+  }
+};
+
+export const updateProfile = async (req: Request, res: Response): Promise<void> => {
+  res.set("Cache-Control", "no-store");
+
+  const userId = req.session.userID;
+  if (!userId) {
+    res.status(401).json({ success: false, message: "Please log in" });
+    return;
+  }
+
+  const { username, email, profileImage } = req.body ?? {};
+  if (typeof username !== "string" || typeof email !== "string") {
+    res.status(400).json({
+      success: false,
+      message: "Username and email are required",
+    });
+    return;
+  }
+
+  const cleanUsername = username.trim();
+  const cleanEmail = email.trim().toLowerCase();
+  if (cleanUsername.length < 1 || cleanUsername.length > 50) {
+    res.status(400).json({ success: false, message: "Username must be 1–50 characters" });
+    return;
+  }
+  if (cleanEmail.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    res.status(400).json({ success: false, message: "Invalid email address" });
+    return;
+  }
+
+  // เก็บ URL ของรูปใน profile_image แทนข้อมูล Base64 ของไฟล์
+  let cleanImage: string | null | undefined;
+  if (profileImage !== undefined) {
+    if (profileImage !== null && typeof profileImage !== "string") {
+      res.status(400).json({ success: false, message: "Invalid profile image URL" });
+      return;
+    }
+
+    cleanImage = typeof profileImage === "string" ? profileImage.trim() || null : null;
+    if (cleanImage !== null) {
+      try {
+        const url = new URL(cleanImage);
+        if (cleanImage.length > 255 || !["http:", "https:"].includes(url.protocol)) {
+          throw new Error("Invalid image URL");
+        }
+      } catch {
+        res.status(400).json({ success: false, message: "Invalid profile image URL" });
+        return;
+      }
+    }
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: { userId: true, username: true, email: true, profileImage: true },
+    });
+    if (!user) {
+      res.status(401).json({ success: false, message: "Please log in" });
+      return;
+    }
+
+    const emailOwner = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+      select: { userId: true },
+    });
+    if (emailOwner && emailOwner.userId !== user.userId) {
+      res.status(409).json({ success: false, message: "Email is already registered" });
+      return;
+    }
+
+    if (cleanUsername !== user.username) {
+      const usernameOwner = await prisma.user.findFirst({
+        where: { username: cleanUsername },
+        select: { userId: true },
+      });
+      if (usernameOwner && usernameOwner.userId !== user.userId) {
+        res.status(409).json({ success: false, message: "Username is already taken" });
+        return;
+      }
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { userId },
+      data: {
+        username: cleanUsername,
+        email: cleanEmail,
+        ...(cleanImage !== undefined ? { profileImage: cleanImage } : {}),
+      },
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        profileImage: true,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      data: updatedUser,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      res.status(409).json({ success: false, message: "Email is already registered" });
+      return;
+    }
+    res.status(500).json({ success: false, message: "Unable to save profile. Please try again" });
+  }
+};
+</file>
+
+<file path="src/controllers/authController.ts">
+import type { Request, Response } from "express";
+import { Prisma } from "../generated/prisma/client.js";
+import prisma from "../config/db.js";
+import { hashPassWord, verifyPassword } from "../utils/password.js";
+import { uploadProfilePhoto } from "../services/profileR2Service.js";
+
+export const register = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { username, email, password } = req.body ?? {};
+    // ตรวจชนิดข้อมูล
+    if (
+      typeof username !== "string" ||
+      typeof email !== "string" ||
+      typeof password !== "string"
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Username, email and password are required",
+      });
+      return;
+    }
+
+    const cleanUsername = username.trim();
+    const cleanEmail = email.trim().toLowerCase();
+  // ตรวจข้อมูลในฐานข้อมูล
+    if (cleanUsername.length < 1 || cleanUsername.length > 50) {
+      res.status(400).json({
+        success: false,
+        message: "Username must be 1–50 characters",
+      });
+      return;
+    }
+
+    if (
+      cleanEmail.length > 100 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid email address",
+      });
+      return;
+    }
+
+    const passwordLength = [...password].length;
+
+    if (passwordLength < 10 || passwordLength > 128) {
+      res.status(400).json({
+        success: false,
+        message: "Password must be 10–128 characters",
+      });
+      return;
+    }
+    // ตรวจอีเมลซ้ำ
+    const existingUser = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+      select: { userId: true },
+    });
+
+    if (existingUser) {
+      res.status(409).json({
+        success: false,
+        message: "Email is already registered",
+      });
+      return;
+    }
+    // Hash พร้อม salt ก่อนบันทึก
+    const hashedPassword = await hashPassWord(password);
+    // บันทึกผู้ใช้ลงตาราง user
+    const values = {
+      username: cleanUsername,
+      email: cleanEmail,
+      password: hashedPassword,
+      profileImage: null,
+    };
+
+    const photo = req.file;
+    const user = photo
+      ? await prisma.$transaction(async (tx) => {
+          const created = await tx.user.create({ data: values });
+          const profileImage = await uploadProfilePhoto(
+            created.userId,
+            photo.mimetype,
+            photo.buffer,
+          );
+          return tx.user.update({
+            where: { userId: created.userId },
+            data: { profileImage },
+          });
+        })
+      : await prisma.user.create({ data: values });
+    // ส่งเฉพาะข้อมูลที่ต้องใช้กลับไป
+    res.status(201).json({
+      success: true,
+      message: "Registration successful",
+      data: {
+        userId: user.userId,
+        username: user.username,
+        email: user.email,
+        profileImage: user.profileImage,
+      },
+    });
+  } catch (error) {
+    // รองรับคำขอสมัครอีเมลเดียวกันที่เข้ามาพร้อมกัน
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      res.status(409).json({
+        success: false,
+        message: "Email is already registered",
+      });
+      return;
+    }
+
+    console.error("Registration failed:", error instanceof Error ? error.message : "Unknown error");
+    res.status(500).json({
+      success: false,
+      message: "Unable to register. Please try again",
+    });
+  }
+};
+
+export const login = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // รองรับ username/email และคำขอเดิมที่ส่ง email มา
+    const identifier = req.body?.identifier ?? req.body?.email;
+    const password = req.body?.password;
+
+    if (typeof identifier !== "string" || typeof password !== "string") {
+      res.status(400).json({
+        success: false,
+        message: "Username or email and password are required",
+      });
+      return;
+    }
+
+    const cleanIdentifier = identifier.trim();
+    const passwordLength = [...password].length;
+
+    if (
+      !cleanIdentifier ||
+      cleanIdentifier.length > 100 ||
+      passwordLength < 1 ||
+      passwordLength > 128
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid username/email or password input",
+      });
+      return;
+    }
+    // ตรวจอีเมลก่อน เพราะอีเมลระบุบัญชีได้ไม่ซ้ำกัน
+    let user = await prisma.user.findUnique({
+      where: { email: cleanIdentifier.toLowerCase() },
+    });
+    // ถ้าไม่พบอีเมล ให้ค้นหา username โดยไม่เลือกบัญชีที่ชื่อซ้ำ
+    if (!user) {
+      const matches = await prisma.user.findMany({
+        where: { username: cleanIdentifier },
+        take: 2,
+      });
+
+      if (matches.length === 1) {
+        user = matches[0] ?? null;
+      }
+    }
+
+    if (!user) {
+      res.status(401).json({
+        success: false,
+        message: "Username/email or password is incorrect",
+      });
+      return;
+    }
+    // ตรวจรหัสผ่านกับ hash ที่เก็บไว้
+    const isPasswordValid = await verifyPassword(user.password, password);
+
+    if (!isPasswordValid) {
+      res.status(401).json({
+        success: false,
+        message: "Username/email or password is incorrect",
+      });
+      return;
+    }
+    // สร้าง session ID ใหม่
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+    // เก็บ ID ผู้ใช้ไว้ใน session
+    req.session.userID = user.userId;
+
+    await new Promise<void>((resolve, reject) => {
+      req.session.save((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+
+    // ส่งข้อมูลผู้ใช้กลับไป
+    res.status(200).json({
+      success: true,
+      message: "Login successful",
+      data: {
+        userId: user.userId,
+        username: user.username,
+        email: user.email,
+        profileImage: user.profileImage,
+      },
+    });
+  } catch {
+    res.status(500).json({
+      success: false,
+      message: "Unable to log in. Please try again",
+    });
+  }
+};
+
+export const getMe = async (req: Request, res: Response): Promise<void> => {
+  res.set("Cache-Control", "no-store");
+
+  try {
+    // อ่าน ID จาก session ที่ Backend เก็บไว้
+    const userId = req.session.userID;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        message: "Please log in",
+      });
+      return;
+    }
+
+    // อ่านข้อมูลล่าสุด โดยไม่ดึง password
+    const user = await prisma.user.findUnique({
+      where: { userId },
+      select: {
+        userId: true,
+        username: true,
+        email: true,
+        profileImage: true,
+      },
+    });
+
+    if (!user) {
+      res.status(401).json({
+        success: false,
+        message: "Please log in",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: user,
+    });
+  } catch {
+    res.status(500).json({
+      success: false,
+      message: "Unable to fetch current user",
+    });
+  }
+};
+
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  res.set("Cache-Control", "no-store");
+
+  try {
+    // ลบ session ฝั่ง Backend
+    await new Promise<void>((resolve, reject) => {
+      req.session.destroy((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+    // สั่งให้เบราว์เซอร์ลบ cookie ชื่อเดียวกับใน server.ts
+    res.clearCookie("animal-spotting.sid", {
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Logout successful",
+    });
+  } catch {
+    res.status(500).json({
+      success: false,
+      message: "Unable to log out. Please try again",
+    });
+  }
+};
+</file>
+
+<file path="src/services/profileR2Service.ts">
+import { randomUUID } from "node:crypto";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+export const PROFILE_IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+};
+export const MAX_PROFILE_PHOTO_SIZE = 2 * 1024 * 1024;
+
+function createProfileUpload(userID: number, fileType: string) {
+  const extension = PROFILE_IMAGE_EXTENSIONS[fileType];
+  if (!extension) throw new Error("Unsupported profile image type");
+
+  const bucket = process.env.R2_BUCKET_NAMEProfile;
+  const endpoint = process.env.R2_ENDPOINTProfile;
+  const accessKeyId = process.env.R2_ACCESS_KEY_IDProfile;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEYProfile;
+  const publicBaseUrl = process.env.R2_PUBLIC_URLProfile;
+
+  if (!bucket || !endpoint || !accessKeyId || !secretAccessKey || !publicBaseUrl) {
+    throw new Error("Profile R2 settings are incomplete: check the five variables ending in Profile");
+  }
+  if (new URL(endpoint).protocol !== "https:" || new URL(publicBaseUrl).protocol !== "https:") {
+    throw new Error("Profile R2 endpoint and public URL must use HTTPS");
+  }
+
+  const key = `profiles/${userID}/${randomUUID()}.${extension}`;
+  const publicUrl = `${publicBaseUrl.replace(/\/+$/, "")}/${key}`;
+  if (publicUrl.length > 255) {
+    throw new Error("Profile image URL exceeds the profile_image column length");
+  }
+
+  const client = new S3Client({
+    region: "auto",
+    endpoint,
+    credentials: { accessKeyId, secretAccessKey },
+    requestChecksumCalculation: "WHEN_REQUIRED",
+  });
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ContentType: fileType,
+  });
+
+  return { client, command, publicUrl };
+}
+
+export async function generateProfilePresignedUrl(userID: number, fileType: string) {
+  const { client, command, publicUrl } = createProfileUpload(userID, fileType);
+  const uploadUrl = await getSignedUrl(client, command, { expiresIn: 300 });
+  return { uploadUrl, publicUrl };
+}
+
+export async function uploadProfilePhoto(userID: number, fileType: string, body: Buffer) {
+  const { client, command, publicUrl } = createProfileUpload(userID, fileType);
+  try {
+    await client.send(new PutObjectCommand({ ...command.input, Body: body }));
+    return publicUrl;
+  } finally {
+    client.destroy();
+  }
+}
+</file>
+
+<file path="src/services/r2ServiceSpots.ts">
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectsCommand,
+  CopyObjectCommand,
+} from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+export const SPOT_IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+};
+
+// กำหนดขนาดสูงสุดต่อรูปไม่เกิน 5 MB
+export const MAX_SPOT_PHOTO_SIZE = 5 * 1024 * 1024;
+export const MAX_SPOT_PHOTOS_COUNT = 20;
+
+// ตั้งค่าเชื่อม cloudfare
+const s3Client = new S3Client({
+  region: "auto",
+  endpoint: process.env.R2_ENDPOINT || "",
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
+  },
+});
+
+export const generatePresignedUrl = async (
+  fileType: string,
+  userId: number,
+) => {
+  const extension = SPOT_IMAGE_EXTENSIONS[fileType];
+  if (!extension) {
+    throw new Error("Unsupported image type");
+  }
+
+  const publicBaseUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "");
+  if (!publicBaseUrl) {
+    throw new Error("R2_PUBLIC_URL is not configured");
+  }
+
+  const uniqueFileName = `spots/${userId}/${randomUUID()}.${extension}`;
+  const publicUrl = `${publicBaseUrl}/${uniqueFileName}`;
+
+  if (publicUrl.length > 255) {
+    throw new Error("Generated public URL exceeds 255 characters");
+  }
+
+  // สร้าง command หาที่ลงผ่าน uniqueFileName ที่เเบ่ง directory ตาม / เตรียมส่ง uploadUrl ไปให้ frontend ว่ารูปนั้นจะลงที่ไหน
+  const command = new PutObjectCommand({
+    Bucket: process.env.R2_BUCKET_NAME,
+    Key: uniqueFileName,
+    ContentType: fileType,
+  });
+
+  const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
+
+  return {
+    uploadUrl,
+    // ตัว url ที่โยงไปหารูปที่ลงไปใน uploadUrl ก่อนหน้า
+    publicUrl,
+  };
+};
+
+// ตรวจสอบว่า URL ที่ส่งมาบันทึกลง DB เป็น URL ของ R2 จริง, อยู่ในโฟลเดอร์ spots/ และยาวไม่เกิน 255 ตัวอักษร
+export const isValidSpotPhotoUrl = (url: string, userId: number): boolean => {
+  if (url.length === 0 || url.length > 255) return false;
+
+  const baseUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "");
+  if (!baseUrl) return false;
+
+  try {
+    const parsedUrl = new URL(url);
+    const parsedBase = new URL(baseUrl);
+
+    if (parsedUrl.origin !== parsedBase.origin) return false;
+
+    return parsedUrl.pathname.startsWith(`/spots/${userId}/`);
+  } catch {
+    return false;
+  }
+};
+
+// ฟังก์ชันสำหรับลบไฟล์บน R2
+export const deleteFilesFromR2 = async (
+  publicUrls: string[],
+): Promise<void> => {
+  if (!publicUrls || publicUrls.length === 0) return;
+
+  const baseUrl = process.env.R2_PUBLIC_URL?.replace(/\/+$/, "") || "";
+
+  // แปลง publicUrl กลับเป็น Key (เช่น "spots/1700000000-cat.jpg")
+  const keys = publicUrls
+    .map((url) => {
+      if (baseUrl && url.startsWith(baseUrl)) {
+        return url.slice(baseUrl.length).replace(/^\/+/, "");
+      }
+      try {
+        return decodeURIComponent(new URL(url).pathname.replace(/^\/+/, ""));
+      } catch {
+        return null;
+      }
+    })
+    .filter((key): key is string => Boolean(key));
+
+  if (keys.length === 0) return;
+
+  const command = new DeleteObjectsCommand({
+    Bucket: process.env.R2_BUCKET_NAME,
+    Delete: {
+      Objects: keys.map((Key) => ({ Key })),
+      Quiet: true,
+    },
+  });
+
+  await s3Client.send(command);
+};
+</file>
+
+<file path="src/routes/authRoutes.ts">
+import { Router } from 'express';
+import { getProfilePhotoUploadUrl, updateProfile } from '../controllers/profileController.js';
+import { changePassword } from '../controllers/passwordController.js';
+import { registerPhotoUpload } from '../middleware/registerPhotoUpload.js';
+import {
+    register,
+    login,
+    getMe,
+    logout,
+} from '../controllers/authController.js';
+
+const router = Router();
+
+router.post('/register', registerPhotoUpload, register);
+router.post('/login', login);
+router.get('/me', getMe);
+router.patch('/me', updateProfile);
+router.patch('/password', changePassword);
+router.post('/profile-photo-url', getProfilePhotoUploadUrl);
+router.post('/logout', logout);
+
+export default router;
+</file>
+
+<file path="src/server.ts">
+import 'dotenv/config';
+import prisma from './config/db.js';
+import express from 'express';
+import cors from 'cors';
+import session from 'express-session';
+import animalRoutes from './routes/animalRoutes.js';
+import spotRoutes from './routes/spotRoutes.js'
+import authRoutes from './routes/authRoutes.js';
+import collectionRoutes from "./routes/collectionRoutes.js";
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// session cookie
+const sessionSecret = process.env.SESSION_SECRET;
+
+if (!sessionSecret) {
+    throw new Error('SESSION_SECRET is required');
+}
+
+app.use(
+    cors({
+        origin: 'http://localhost:3000',
+        credentials: true,
+    }),
+);
+
+app.use(express.json());
+
+app.use(
+    session({
+        name: 'animal-spotting.sid',
+        secret: sessionSecret,
+        resave: false,
+        saveUninitialized: false,
+        cookie: {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 1000 * 60 * 60 * 24,
+        },
+    }),
+);
+
+app.use('/api/animals', animalRoutes);
+app.use('/api/spots', spotRoutes);
+app.use('/api/auth', authRoutes);
+app.use("/api/collection", collectionRoutes);
+
+app.get('/', (req, res) => {
+    res.send('Animal Spotting API is running! 🦁🐯');
+});
+
+const startServer = async () => {
+    try {
+        await prisma.$connect()
+        console.log('Succesfully connected to server');
+
+        app.listen(PORT, () => {
+            console.log(`Server running at PORT: ${PORT}`);
+        });
+    } catch (error) {
+        console.error('Error cannot connected to server', error);
+    }
+};
+
+startServer();
+</file>
+
+<file path="src/controllers/spotController.ts">
+import type { Request, Response } from "express";
+import prisma from "../config/db.js";
+import {
+  generatePresignedUrl,
+  deleteFilesFromR2,
+  isValidSpotPhotoUrl,
+  SPOT_IMAGE_EXTENSIONS,
+  MAX_SPOT_PHOTO_SIZE,
+  MAX_SPOT_PHOTOS_COUNT,
+} from "../services/r2ServiceSpots.js";
+
+// Helper สำหรับ Throw error ที่มี HTTP status ภายใน Prisma interactive transaction
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Helper ตรวจสอบพิกัด Latitude / Longitude
+function parseCoordinate(
+  value: unknown,
+  min: number,
+  max: number,
+): number | null {
+  const num =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(num) || num < min || num > max) return null;
+  return num;
+}
+
+// Helper ตรวจสอบและกรองรายการ photoUrls
+function validatePhotoUrls(
+  photoUrls: unknown,
+  userId: number,
+): { ok: true; urls: string[] } | { ok: false; message: string } {
+  if (!Array.isArray(photoUrls)) {
+    return { ok: false, message: "photoUrls must be an array" };
+  }
+  if (photoUrls.length > MAX_SPOT_PHOTOS_COUNT) {
+    return {
+      ok: false,
+      message: `You can upload up to ${MAX_SPOT_PHOTOS_COUNT} photos per spot`,
+    };
+  }
+
+  const cleaned: string[] = [];
+  for (const item of photoUrls) {
+    if (typeof item !== "string") {
+      return { ok: false, message: "Invalid photo URL format" };
+    }
+    const trimmedUrl = item.trim();
+    if (!isValidSpotPhotoUrl(trimmedUrl, userId)) {
+      return { ok: false, message: "Invalid or unauthorized photo URL" };
+    }
+    cleaned.push(trimmedUrl);
+  }
+  return { ok: true, urls: [...new Set(cleaned)] };
+}
+
+// api for presignedurl
+export const getPresignedUrl = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = req.session.userID;
+    if (!userId) {
+      res.status(401).json({ success: false, message: "Please log in" });
+      return;
+    }
+
+    const { fileType, fileSize, spotId } = req.body ?? {};
+
+    if (
+      typeof fileType !== "string" ||
+      !Object.hasOwn(SPOT_IMAGE_EXTENSIONS, fileType)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Only PNG, JPEG, or WebP images are allowed",
+      });
+      return;
+    }
+
+    if (
+      typeof fileSize !== "number" ||
+      !Number.isInteger(fileSize) ||
+      fileSize <= 0 ||
+      fileSize > MAX_SPOT_PHOTO_SIZE
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Image size must be between 1 byte and 5 MB",
+      });
+      return;
+    }
+
+    let parsedSpotId: number | undefined = undefined;
+    if (spotId !== undefined && spotId !== null && spotId !== "") {
+      parsedSpotId = Number(spotId);
+      if (Number.isNaN(parsedSpotId) || parsedSpotId <= 0) {
+        res.status(400).json({ success: false, message: "Invalid spotId" });
+        return;
+      }
+
+      // เช็กสิทธิ์ว่าเป็นเจ้าของ Spot จริงไหมก่อนออกลิงก์ให้อัปโหลดเข้าโฟลเดอร์นั้น
+      const spot = await prisma.spot.findUnique({
+        where: { spotId: parsedSpotId },
+        select: { userId: true },
+      });
+
+      if (!spot) {
+        res.status(404).json({ success: false, message: "Spot not found" });
+        return;
+      }
+
+      if (spot.userId !== userId) {
+        res.status(403).json({
+          success: false,
+          message: "You do not have permission to upload to this spot",
+        });
+        return;
+      }
+    }
+
+    const { uploadUrl, publicUrl } = await generatePresignedUrl(
+      fileType,
+      userId,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: { uploadUrl, publicUrl },
+    });
+  } catch (error) {
+    console.error("Error generating presigned url:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+// api create spot
+export const createSpot = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const { title, description, address, lat, lng, photoUrls, animals, date } =
+    req.body;
+
+  const userId = req.session.userID;
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Please log in",
+    });
+    return;
+  }
+
+  // ตรวจสอบ title (VarChar(100))
+  if (
+    typeof title !== "string" ||
+    title.trim().length < 1 ||
+    title.trim().length > 100
+  ) {
+    res.status(400).json({
+      success: false,
+      message: "Title is required and must be 1–100 characters",
+    });
+    return;
+  }
+  const cleanTitle = title.trim();
+
+  // ตรวจสอบ address
+  if (
+    typeof address !== "string" ||
+    address.trim().length < 1 ||
+    address.trim().length > 1000
+  ) {
+    res.status(400).json({
+      success: false,
+      message: "Address is required and must be 1–1000 characters",
+    });
+    return;
+  }
+  const cleanAddress = address.trim();
+
+  let cleanDate: Date | null = null;
+  if (date !== undefined && date !== null && date !== "") {
+    if (typeof date !== "string" && !(date instanceof Date)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid date format",
+      });
+      return;
+    }
+
+    const parsedDate = new Date(date);
+    // เเปลง date เป็น Timestamp เช็คว่า date มาถูกมั้ย
+    if (Number.isNaN(parsedDate.getTime())) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid date format",
+      });
+      return;
+    }
+    cleanDate = parsedDate;
+  }
+
+  // ตรวจสอบ description (Optional)
+  let cleanDescription: string | null = null;
+  if (description !== undefined && description !== null) {
+    if (typeof description !== "string" || description.length > 5000) {
+      res.status(400).json({
+        success: false,
+        message: "Description must be text up to 5000 characters",
+      });
+      return;
+    }
+    cleanDescription = description.trim() || null;
+  }
+
+  // ตรวจสอบพิกัด lat (-90..90) และ lng (-180..180)
+  const cleanLat = parseCoordinate(lat, -90, 90);
+  const cleanLng = parseCoordinate(lng, -180, 180);
+  if (cleanLat === null || cleanLng === null) {
+    res.status(400).json({
+      success: false,
+      message:
+        "Valid latitude (-90 to 90) and longitude (-180 to 180) are required",
+    });
+    return;
+  }
+
+  // ตรวจสอบ photoUrls
+  let validUrls: string[] = [];
+  if (photoUrls !== undefined && photoUrls !== null) {
+    const photoCheck = validatePhotoUrls(photoUrls, userId);
+    if (!photoCheck.ok) {
+      res.status(400).json({ success: false, message: photoCheck.message });
+      return;
+    }
+    validUrls = photoCheck.urls;
+  }
+
+  try {
+    const newSpot = await prisma.$transaction(async (tx) => {
+      const created = await tx.spot.create({
+        data: {
+          userId,
+          title: cleanTitle,
+          description: cleanDescription ?? null,
+          address: cleanAddress,
+          latitude: cleanLat,
+          longitude: cleanLng,
+          date: cleanDate,
+        },
+      });
+
+      if (validUrls.length > 0) {
+        await tx.photo.createMany({
+          data: validUrls.map((photoUrl) => ({
+            spotId: created.spotId,
+            photoUrl,
+          })),
+        });
+      }
+
+      if (animals && Array.isArray(animals) && animals.length > 0) {
+        const uniqueAnimalIds = [
+          ...new Set(
+            animals
+              .map((animal: any) =>
+                typeof animal === "object" && animal !== null
+                  ? Number(animal.animalId)
+                  : NaN,
+              )
+              .filter((id: number) => !Number.isNaN(id) && id > 0),
+          ),
+        ];
+
+        if (uniqueAnimalIds.length > 0) {
+          await tx.spottedIn.createMany({
+            data: uniqueAnimalIds.map((animalId) => ({
+              spotId: created.spotId,
+              animalId,
+            })),
+          });
+
+          await tx.animal.updateMany({
+            where: { animalId: { in: uniqueAnimalIds } },
+            data: { spotsCount: { increment: 1 } },
+          });
+        }
+      }
+
+      return tx.spot.findUnique({
+        where: { spotId: created.spotId },
+        include: {
+          user: {
+            select: { userId: true, username: true, profileImage: true },
+          },
+          photos: {
+            select: { photoId: true, photoUrl: true },
+          },
+        },
+      });
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Spot created successfully",
+      data: newSpot,
+    });
+  } catch (error) {
+    console.error("Error creating spot:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+// api getall spots
+export const getAllSpots = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const rawSpots = await prisma.spot.findMany({
+      include: {
+        photos: {
+          select: { photoId: true, photoUrl: true },
+        },
+        spottedIn: {
+          select: {
+            animal: {
+              select: {
+                animalId: true,
+                name: true,
+                categoryId: true,
+                animalImagePin: true,
+              },
+            },
+          },
+        },
+        user: {
+          select: { userId: true, username: true, profileImage: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const spots = rawSpots.map(({ spottedIn, ...spot }) => ({
+      ...spot,
+      animals: spottedIn.map((item) => item.animal),
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: spots.length,
+      data: spots,
+    });
+  } catch (error) {
+    console.error("Error fetching spots:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+// api update spot
+export const updateSpot = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const spotId = Number(req.params.spotId);
+  const userId = req.session.userID;
+
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Please log in",
+    });
+    return;
+  }
+
+  if (Number.isNaN(spotId) || spotId <= 0) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid spot ID",
+    });
+    return;
+  }
+
+  const { title, description, address, photoUrls, animals, date } = req.body;
+
+  // 1. Validate ฟิลด์ที่ถูกส่งเข้ามาแก้ไข (เช็กเฉพาะตัวที่ !== undefined)
+  let cleanTitle: string | undefined;
+  if (title !== undefined) {
+    if (
+      typeof title !== "string" ||
+      title.trim().length < 1 ||
+      title.trim().length > 100
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Title must be 1–100 characters",
+      });
+      return;
+    }
+    cleanTitle = title.trim();
+  }
+
+  let cleanAddress: string | undefined;
+  if (address !== undefined) {
+    if (
+      typeof address !== "string" ||
+      address.trim().length < 1 ||
+      address.trim().length > 1000
+    ) {
+      res.status(400).json({
+        success: false,
+        message: "Address must be 1–1000 characters",
+      });
+      return;
+    }
+    cleanAddress = address.trim();
+  }
+
+  let cleanDescription: string | null | undefined;
+  if (description !== undefined) {
+    if (description === null) {
+      cleanDescription = null;
+    } else if (typeof description !== "string" || description.length > 5000) {
+      res.status(400).json({
+        success: false,
+        message: "Description must be text up to 5000 characters",
+      });
+      return;
+    } else {
+      cleanDescription = description.trim() || null;
+    }
+  }
+
+  let cleanDate: Date | null | undefined;
+  if (date !== undefined) {
+    if (date === null || date === "") {
+      cleanDate = null;
+    } else {
+      const parsedDate = new Date(date);
+      if (Number.isNaN(parsedDate.getTime())) {
+        res
+          .status(400)
+          .json({ success: false, message: "Invalid date format" });
+        return;
+      }
+      cleanDate = parsedDate;
+    }
+  }
+
+  // ใช้ validatePhotoUrls ตัวเดียวกับ createSpot
+  let validatedPhotoUrls: string[] | undefined;
+  if (photoUrls !== undefined) {
+    const photoCheck = validatePhotoUrls(photoUrls, userId);
+    if (!photoCheck.ok) {
+      res.status(400).json({ success: false, message: photoCheck.message });
+      return;
+    }
+    validatedPhotoUrls = photoCheck.urls;
+  }
+
+  try {
+    // 1. ค้นหา Spot เดิมและตรวจสอบสิทธิ์ความเป็นเจ้าของก่อนทำอย่างอื่น
+    const spot = await prisma.spot.findUnique({ where: { spotId } });
+
+    if (!spot) {
+      res.status(404).json({ success: false, message: "Spot not found" });
+      return;
+    }
+
+    if (spot.userId !== userId) {
+      res.status(403).json({
+        success: false,
+        message: "You do not have permission to edit this spot",
+      });
+      return;
+    }
+
+    // 2. เตรียมจัดการรูปภาพ
+    let removedUrls: string[] = [];
+    let addedUrls: string[] = [];
+
+    if (validatedPhotoUrls !== undefined) {
+      const existingPhotos = await prisma.photo.findMany({
+        where: { spotId },
+      });
+      const existingUrls = existingPhotos.map((p) => p.photoUrl);
+
+      removedUrls = existingUrls.filter(
+        (url) => !validatedPhotoUrls!.includes(url),
+      );
+      addedUrls = validatedPhotoUrls.filter(
+        (url) => !existingUrls.includes(url),
+      );
+    }
+
+    // 3. เปิด Transaction อัปเดตข้อมูลทั้งหมดลง Database
+    const rawUpdatedSpot = await prisma.$transaction(async (tx) => {
+      // 3.1 อัปเดตข้อมูลหลักของ Spot
+      await tx.spot.update({
+        where: { spotId },
+        data: {
+          title: cleanTitle ?? spot.title,
+          description:
+            cleanDescription !== undefined
+              ? cleanDescription
+              : spot.description,
+          address: cleanAddress ?? spot.address,
+          date: cleanDate !== undefined ? cleanDate : spot.date,
+        },
+      });
+
+      // 3.2 อัปเดตตาราง Photo
+      if (validatedPhotoUrls !== undefined) {
+        if (removedUrls.length > 0) {
+          await tx.photo.deleteMany({
+            where: { spotId, photoUrl: { in: removedUrls } },
+          });
+        }
+
+        if (addedUrls.length > 0) {
+          await tx.photo.createMany({
+            data: addedUrls.map((photoUrl) => ({ spotId, photoUrl })),
+          });
+        }
+      }
+
+      // 3.3 จัดการสัตว์แบบ Differential
+      if (Array.isArray(animals)) {
+        const newAnimalIds = [
+          ...new Set(
+            animals
+              .map((animal: any) =>
+                typeof animal === "object" && animal !== null
+                  ? Number(animal.animalId)
+                  : NaN,
+              )
+              .filter((id: number) => !Number.isNaN(id) && id > 0),
+          ),
+        ];
+
+        const oldSpottedRecords = await tx.spottedIn.findMany({
+          where: { spotId },
+        });
+        const oldAnimalIds = oldSpottedRecords.map((r) => r.animalId);
+
+        const removedAnimalIds = oldAnimalIds.filter(
+          (id) => !newAnimalIds.includes(id),
+        );
+        const addedAnimalIds = newAnimalIds.filter(
+          (id) => !oldAnimalIds.includes(id),
+        );
+
+        if (removedAnimalIds.length > 0) {
+          await tx.spottedIn.deleteMany({
+            where: { spotId, animalId: { in: removedAnimalIds } },
+          });
+
+          await tx.animal.updateMany({
+            where: {
+              animalId: { in: removedAnimalIds },
+              spotsCount: { gt: 0 },
+            },
+            data: { spotsCount: { decrement: 1 } },
+          });
+        }
+
+        if (addedAnimalIds.length > 0) {
+          await tx.spottedIn.createMany({
+            data: addedAnimalIds.map((animalId) => ({ spotId, animalId })),
+          });
+
+          await tx.animal.updateMany({
+            where: { animalId: { in: addedAnimalIds } },
+            data: { spotsCount: { increment: 1 } },
+          });
+        }
+      }
+
+      // 3.4 ดึงข้อมูลล่าสุดพร้อม include ส่งกลับไปให้หน้าบ้าน
+      return tx.spot.findUnique({
+        where: { spotId },
+        include: {
+          photos: {
+            select: { photoId: true, photoUrl: true },
+          },
+          spottedIn: {
+            select: {
+              animal: {
+                select: {
+                  animalId: true,
+                  name: true,
+                  categoryId: true,
+                  animalImagePin: true,
+                },
+              },
+            },
+          },
+          user: {
+            select: { userId: true, username: true, profileImage: true },
+          },
+        },
+      });
+    });
+
+    // 4. ลบรูปเก่าที่ไม่ได้ใช้ออกจาก R2 แบบ Background
+    if (removedUrls.length > 0) {
+      deleteFilesFromR2(removedUrls).catch((r2Err) => {
+        console.error("Warning: Failed to delete old files from R2:", r2Err);
+      });
+    }
+
+    const updatedSpot = rawUpdatedSpot
+      ? (() => {
+          const { spottedIn, ...rest } = rawUpdatedSpot;
+          return {
+            ...rest,
+            animals: spottedIn.map((item) => item.animal),
+          };
+        })()
+      : null;
+
+    res.status(200).json({
+      success: true,
+      message: "Spot updated successfully",
+      data: updatedSpot,
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      res.status(error.status).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    console.error("Error updating spot:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+// api delete spot
+export const deleteSpot = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const spotId = Number(req.params.spotId);
+  const userId = req.session.userID;
+
+  if (!userId) {
+    res.status(401).json({
+      success: false,
+      message: "Please log in",
+    });
+    return;
+  }
+
+  if (Number.isNaN(spotId) || spotId <= 0) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid spot ID",
+    });
+    return;
+  }
+
+  try {
+    const photoUrlsToDelete = await prisma.$transaction(async (tx) => {
+      // 1. ค้นหา Spot และตรวจสอบสิทธิ์ความเป็นเจ้าของ
+      const spot = await tx.spot.findUnique({ where: { spotId } });
+
+      if (!spot) {
+        throw new HttpError(404, "Spot not found");
+      }
+
+      if (spot.userId !== userId) {
+        throw new HttpError(
+          403,
+          "You do not have permission to delete this spot",
+        );
+      }
+
+      // 2. ดึง URL รูปภาพทั้งหมดของ Spot นี้เก็บไว้ (เพื่อเอาไปลบออกจาก R2 หลัง commit)
+      const photos = await tx.photo.findMany({
+        where: { spotId },
+        select: { photoUrl: true },
+      });
+      const urls = photos.map((p) => p.photoUrl);
+
+      // 3. ดึงรายการสัตว์ที่ผูกกับ Spot นี้ เพื่อลด spotsCount ลง 1
+      const spottedRecords = await tx.spottedIn.findMany({
+        where: { spotId },
+        select: { animalId: true },
+      });
+      const animalIds = spottedRecords.map((r) => r.animalId);
+
+      if (animalIds.length > 0) {
+        await tx.animal.updateMany({
+          where: {
+            animalId: { in: animalIds },
+            spotsCount: { gt: 0 },
+          },
+          data: { spotsCount: { decrement: 1 } },
+        });
+      }
+
+      // 4. ลบข้อมูลในตารางลูก และลบตัว Spot หลัก
+      await tx.photo.deleteMany({ where: { spotId } });
+      await tx.spottedIn.deleteMany({ where: { spotId } });
+      await tx.spot.delete({ where: { spotId } });
+
+      return urls;
+    });
+
+    if (photoUrlsToDelete.length > 0) {
+      deleteFilesFromR2(photoUrlsToDelete).catch((r2Err) => {
+        console.error("Warning: Failed to delete spot photos from R2:", r2Err);
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Spot deleted successfully",
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      res.status(error.status).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+    console.error("Error deleting spot:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+</file>
+
+<file path="package.json">
+{
+  "name": "animal_spotting_db",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsx watch src/server.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1167.0",
+    "@aws-sdk/s3-request-presigner": "^3.1167.0",
+    "@prisma/adapter-mariadb": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "argon2": "^0.45.2",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "express-session": "^1.19.0",
+    "mariadb": "^3.5.5",
+    "multer": "^2.5.0",
+    "mysql2": "^3.24.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/express-session": "^1.19.0",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "@types/supertest": "^7.2.1",
+    "prisma": "^7.10.1",
+    "supertest": "^7.3.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}
+</file>
+
+</files>
